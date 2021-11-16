@@ -29,6 +29,7 @@ def multi_threads(ss, threads_id, hd_wid: str):
         if success is True or msg == '当前活动预约人数已满，请重新选择！':
             sys.exit(0)
         i += 1
+        time.sleep(0.3)
 
 
 def get_lecture_list(ss):
