@@ -4,7 +4,7 @@ import requests, json
 from login import login
 import time
 import threading
-
+import copy
 
 # 这是一个示例 Python 脚本。
 
@@ -110,9 +110,9 @@ if __name__ == '__main__':
         print('等待{}秒'.format(begin_time - advance_time - current_time))
         time.sleep(begin_time - advance_time - current_time)
     print('开始抢课')
-    t1 = threading.Thread(target=multi_threads, args=(s, 't1', wid))
-    t2 = threading.Thread(target=multi_threads, args=(s, 't2', wid))
-    t3 = threading.Thread(target=multi_threads, args=(s, 't3', wid))
+    t1 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't1', wid))
+    t2 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't2', wid))
+    t3 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't3', wid))
     t1.start()
     t2.start()
     t3.start()
