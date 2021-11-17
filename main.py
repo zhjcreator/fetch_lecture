@@ -6,6 +6,7 @@ import time
 import threading
 import copy
 
+
 # 这是一个示例 Python 脚本。
 
 # 按 Shift+F10 执行或将其替换为您的代码。
@@ -18,6 +19,9 @@ def fetch_lecture(hd_wid: str, ss):
     form = {"paramJson": json.dumps(data_json)}
     r = ss.post(url, data=form)
     result = r.json()
+    if result['success'] is not False:
+        print(result)
+        sys.exit(0)
     return result['code'], result['msg'], result['success']
 
 
@@ -106,15 +110,18 @@ if __name__ == '__main__':
     if current_time > end_time:
         print("抢课时间已结束，大侠请重新来过")
         sys.exit(0)
-    if current_time < begin_time - advance_time:
+    while current_time < begin_time - advance_time:
+        current_time = int(time.time())
         print('等待{}秒'.format(begin_time - advance_time - current_time))
-        time.sleep(begin_time - advance_time - current_time)
+        time.sleep(1)
     print('开始抢课')
     t1 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't1', wid))
     t2 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't2', wid))
     t3 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't3', wid))
     t1.start()
+    time.sleep(0.1)
     t2.start()
+    time.sleep(0.1)
     t3.start()
 # print(s)
 
