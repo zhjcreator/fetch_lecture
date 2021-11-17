@@ -30,7 +30,7 @@ def multi_threads(ss, threads_id, hd_wid: str):
     while True:
         code, msg, success = fetch_lecture(hd_wid, ss)
         print('线程{},第{}次请求,code：{},msg：{},success:{}'.format(threads_id, i, code, msg, success))
-        if success is True or msg == '当前活动预约人数已满，请重新选择！':
+        if success is True or msg == '当前活动预约人数已满，请重新选择！' or msg == '已经预约过该活动，无需重新预约！':
             sys.exit(0)
         i += 1
         time.sleep(0.3)
