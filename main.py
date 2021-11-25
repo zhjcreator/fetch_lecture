@@ -57,13 +57,14 @@ def get_lecture_info(w_id, ss):
 if __name__ == '__main__':
     user_name = None
     password = None
+    stu_info = None
     try:
         with open('config.txt', 'r') as f:
             stu_info = [line.strip() for line in f]
     except Exception as identifier:
-        print('请在本程序同级目录下创建config.txt文件，并按要求填写学号、密码')
+        print('将在本程序同级目录下创建config.txt文件，请按要求填写学号、密码，即可自动登录')
 
-    if len(stu_info):
+    if stu_info and len(stu_info):
         try:
             user_name = stu_info[0]
             password = stu_info[1]
@@ -73,6 +74,9 @@ if __name__ == '__main__':
     if not user_name and not password:
         user_name = input("请输入学号：").strip()
         password = input("请输入密码：").strip()
+        with open('config.txt', 'wb') as f:
+            f.write("{}\n".format(user_name).encode())
+            f.write("{}\n".format(password).encode())
 
     print(time.ctime(), " 开始登陆")
     s = login(user_name, password)
