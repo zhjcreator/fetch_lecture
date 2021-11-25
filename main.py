@@ -55,11 +55,26 @@ def get_lecture_info(w_id, ss):
 
 # 按间距中的绿色按钮以运行脚本。
 if __name__ == '__main__':
-    print("请输入帐号:")
-    user_name = input()
-    print("请输入密码:")
-    password = input()
-    print("开始登陆")
+    user_name = None
+    password = None
+    try:
+        with open('config.txt', 'r') as f:
+            stu_info = [line.strip() for line in f]
+    except Exception as identifier:
+        print('请在本程序同级目录下创建config.txt文件，并按要求填写学号、密码')
+
+    if len(stu_info):
+        try:
+            user_name = stu_info[0]
+            password = stu_info[1]
+        except IndexError as identifier:
+            print("请在config.txt配置正确的账号密码，即可自动登录")
+
+    if not user_name and not password:
+        user_name = input("请输入学号：").strip()
+        password = input("请输入密码：").strip()
+
+    print(time.ctime(), " 开始登陆")
     s = login(user_name, password)
     while s is False or s is None:
         print("请重新登陆")
