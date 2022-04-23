@@ -1,3 +1,6 @@
-beautifulsoup4==4.8.1
-Js2Py==0.71
-requests==2.22.0
+requests~=2.27.1
+beautifulsoup4~=4.11.1
+js2py~=0.71
+ddddocr~=1.4.3
+pandas~=1.4.2
+tqdm~=4.63.0

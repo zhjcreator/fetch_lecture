@@ -1,15 +1,18 @@
+import base64
+import json
 import sys
-
-import requests, json
-from login import login
 import time
-import threading
-import copy
+
+import ddddocr  # 导入 ddddocr
+
+from login import login
+
+ocr = ddddocr.DdddOcr()
 
 
-def fetch_lecture(hd_wid: str, ss):
+def fetch_lecture(hd_wid: str, ss, ver_code):
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
-    data_json = {'HD_WID': hd_wid}
+    data_json = {'HD_WID': hd_wid, 'vcode': ver_code}
     form = {"paramJson": json.dumps(data_json)}
     r = ss.post(url, data=form)
     result = r.json()
@@ -19,15 +22,24 @@ def fetch_lecture(hd_wid: str, ss):
     return result['code'], result['msg'], result['success']
 
 
-def multi_threads(ss, threads_id, hd_wid: str):
-    i = 1
-    while True:
-        code, msg, success = fetch_lecture(hd_wid, ss)
-        print('线程{},第{}次请求,code：{},msg：{},success:{}'.format(threads_id, i, code, msg, success))
-        if success is True or msg == '当前活动预约人数已满，请重新选择！' or msg == '已经预约过该活动，无需重新预约！':
-            sys.exit(0)
-        i += 1
-        time.sleep(0.3)
+def get_code(ss):
+    c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do"
+    c = ss.get(c_url)
+    c_r = c.json()
+    c_img = base64.b64decode(c_r['result'].split(',')[1])
+    c = ocr.classification(c_img)
+    return c, c_img
+
+
+# def multi_threads(ss, threads_id, hd_wid: str, ver_code):
+#     i = 1
+#     while True:
+#         code, msg, success = fetch_lecture(hd_wid, ss, ver_code)
+#         print('线程{},第{}次请求,code：{},msg：{},success:{}'.format(threads_id, i, code, msg, success))
+#         if success is True or msg == '当前活动预约人数已满，请重新选择！' or msg == '已经预约过该活动，无需重新预约！':
+#             sys.exit(0)
+#         i += 1
+#         time.sleep(0.3)
 
 
 def get_lecture_list(ss):
@@ -120,7 +132,7 @@ if __name__ == '__main__':
                 break
             else:
                 pass
-    print("请输入提前几秒开始抢（请保证本地时间准确）：")
+    print("请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制——连续抢10次左右，请勿提前太多）：")
     advance_time = int(input().strip())
     current_time = int(time.time())
     begin_time = int(time.mktime(time.strptime(lecture_info['YYKSSJ'], "%Y-%m-%d %H:%M:%S")))
@@ -132,12 +144,15 @@ if __name__ == '__main__':
         current_time = int(time.time())
         print('等待{}秒'.format(begin_time - advance_time - current_time))
         time.sleep(1)
-        print(time.ctime(), '开始抢课')
-    t1 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't1', wid))
-    t2 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't2', wid))
-    t3 = threading.Thread(target=multi_threads, args=(copy.deepcopy(s), 't3', wid))
-    t1.start()
-    time.sleep(0.1)
-    t2.start()
-    time.sleep(0.1)
-    t3.start()
+    print(time.ctime(), '开始抢课')
+    v_code, _ = get_code(ss=s)
+    i = 1
+    while True:
+        code, msg, success = fetch_lecture(wid, s, v_code)
+        print('第{}次请求,code：{},msg：{},success:{}'.format(i, code, msg, success))
+        if success:
+            break
+        if msg == '验证码错误！':
+            v_code = get_code(ss=s)
+        time.sleep(0.3)
+        i += 1
