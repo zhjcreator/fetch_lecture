@@ -73,14 +73,14 @@ if __name__ == '__main__':
     try:
         with open('config.txt', 'r') as f:
             stu_info = [line.strip() for line in f]
-    except Exception as identifier:
+    except Exception:
         print('将在本程序同级目录下创建config.txt文件，请按要求填写学号、密码，即可自动登录')
 
     if stu_info and len(stu_info):
         try:
             user_name = stu_info[0]
             password = stu_info[1]
-        except IndexError as identifier:
+        except Exception:
             print("请在config.txt配置正确的账号密码，即可自动登录")
 
     if not user_name and not password:
@@ -90,20 +90,17 @@ if __name__ == '__main__':
             f.write("{}\n".format(user_name).encode())
             f.write("{}\n".format(password).encode())
 
-    print(time.ctime(), " 开始登陆")
+    print(time.ctime(), "开始登陆")
     s = login(user_name, password)
     while s is False or s is None:
         print("请重新登陆")
-        print("请输入帐号:")
-        user_name = input()
-        print("请输入密码:")
-        password = input()
+        user_name = input("请输入学号：")
+        password = input("请输入密码：")
         print("开始登陆")
         s = login(user_name, password)
     print("登陆成功")
     print("----------------课程列表----------------")
     lecture_list = get_lecture_list(s)
-    target_index = None
     for index, lecture in enumerate(lecture_list):
         print('序号：', end='')
         print(index, end=' ')
@@ -120,20 +117,13 @@ if __name__ == '__main__':
     print("----------------课程列表end----------------")
     lecture_info = False
     while True:
-        print("请输入课程序号：")
-        target_index = int(input().strip())
+        target_index = int(input("请输入课程序号：").strip())
         lecture_info = lecture_list[target_index]
         wid = lecture_info['WID']
-        # lecture_info = get_lecture_info(wid, s)
-        if lecture_info is not False:
-            print("确认讲座名称：{}. y/n".format(lecture_info['JZMC']))
-            confirm = input().strip()
-            if confirm == 'y' or confirm == 'Y':
-                break
-            else:
-                pass
-    print("请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制——连续抢10次左右，请勿提前太多）：")
-    advance_time = int(input().strip())
+        confirm = input(f"确认讲座名称 {lecture_info['JZMC']} (y/n)：").strip()
+        if confirm == 'y' or confirm == 'Y':
+            break
+    advance_time = int(input("请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议2秒）：").strip())
     current_time = int(time.time())
     begin_time = int(time.mktime(time.strptime(lecture_info['YYKSSJ'], "%Y-%m-%d %H:%M:%S")))
     end_time = int(time.mktime(time.strptime(lecture_info['YYJSSJ'], "%Y-%m-%d %H:%M:%S")))
@@ -148,11 +138,15 @@ if __name__ == '__main__':
     v_code, _ = get_code(ss=s)
     i = 1
     while True:
-        code, msg, success = fetch_lecture(wid, s, v_code)
-        print('第{}次请求,code：{},msg：{},success:{}'.format(i, code, msg, success))
-        if success:
-            break
-        if msg == '验证码错误！':
-            v_code = get_code(ss=s)
-        time.sleep(0.3)
-        i += 1
+        try:
+            code, msg, success = fetch_lecture(wid, s, v_code)
+            print(f'第{i}次请求，code：{code}，msg：{msg}，success: {success}')
+            if success or '请求过于频繁' in msg:
+                break
+            if '验证码错误' in msg or '人数已满' in msg:
+                v_code, _ = get_code(ss=s)
+        except Exception:
+            continue
+        finally:
+            time.sleep(0.3)
+            i += 1
