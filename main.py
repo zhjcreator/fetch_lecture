@@ -5,7 +5,7 @@ import time
 
 import ddddocr  # 导入 ddddocr
 
-from login import login
+from login_to_ehall import login_to_ehall
 
 ocr = ddddocr.DdddOcr()
 
@@ -20,7 +20,6 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         print(result)
         sys.exit(0)
     return result['code'], result['msg'], result['success']
-
 
 def get_code(ss):
     c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do"
@@ -42,15 +41,21 @@ def get_code(ss):
 #         time.sleep(0.3)
 
 
-def get_lecture_list(ss):
+def get_lecture_list(ss, cookie):
+    ss.headers['Cookie'] = cookie
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do#/hdyy"
     ss.get(url)
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do"
-    form = {"pageSize": 12, "pageNumber": 1}
-    r = ss.post(url, data=form)
+    form = {"pageSize": 15, "pageNumber": 1}
+    r = ss.get(url)    # r = ss.post(url, data=form)
     response = r.json()
     rows = response['datas']['hdxxxs']['rows']
-    return rows
+    stu_count = [[0, 0] for _ in range(len(rows))]
+    for i, lecture in enumerate(rows):
+        stu_count[i][0] = int(lecture['HDZRS'])
+        stu_count[i][1] = int(lecture['YYRS'])
+
+    return rows, stu_count
 
 
 def get_lecture_info(w_id, ss):
@@ -64,9 +69,7 @@ def get_lecture_info(w_id, ss):
         print("课程信息获取失败")
         return False
 
-
-# 按间距中的绿色按钮以运行脚本。
-if __name__ == '__main__':
+def main(cookie):
     user_name = None
     password = None
     stu_info = None
@@ -91,17 +94,21 @@ if __name__ == '__main__':
             f.write("{}\n".format(password).encode())
 
     print(time.ctime(), "开始登陆")
-    s = login(user_name, password)
+    s = login_to_ehall(user_name, password)
+    # s = login(user_name, password)
     while s is False or s is None:
         print("请重新登陆")
         user_name = input("请输入学号：")
         password = input("请输入密码：")
         print("开始登陆")
-        s = login(user_name, password)
+        s = login_to_ehall(user_name, password)
+        # s = seu_login(user_name, password )
+
     print("登陆成功")
     print("----------------课程列表----------------")
-    lecture_list = get_lecture_list(s)
+    lecture_list, stu_count = get_lecture_list(s, cookie)
     for index, lecture in enumerate(lecture_list):
+
         print('序号：', end='')
         print(index, end=' ')
         print("课程wid：", end=" ")
@@ -139,14 +146,31 @@ if __name__ == '__main__':
     i = 1
     while True:
         try:
-            code, msg, success = fetch_lecture(wid, s, v_code)
-            print(f'第{i}次请求，code：{code}，msg：{msg}，success: {success}')
-            if success or '请求过于频繁' in msg:
-                break
-            if '验证码错误' in msg or '人数已满' in msg:
-                v_code, _ = get_code(ss=s)
+            _, stu_count = get_lecture_list(s)
+            if stu_count[target_index][0] > stu_count[target_index][1]:
+                code, msg, success = fetch_lecture(wid, s, v_code)
+                print(f'第{i}次请求，code：{code}，msg：{msg}，success: {success}')
+                if success or '请求过于频繁' in msg:
+                    break
+                if '验证码错误' in msg or '人数已满' in msg:
+                    v_code, _ = get_code(ss=s)
+                i += 1
+            else:
+                print("当前人数已满，进入等待状态！已等待时间: {}s".format(int(time.time()) - current_time))
+                continue
+
         except Exception:
             continue
         finally:
-            time.sleep(0.3)
-            i += 1
+            time.sleep(0.5)
+
+# 按间距中的绿色按钮以运行脚本。
+if __name__ == '__main__':
+    lecture_cookie = ''
+    try:
+        main(lecture_cookie)
+    except Exception as e:
+        print(e)
+        print('课程列表列出错误，请将你的cookie赋予lecture_cookie')
+
+
