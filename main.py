@@ -21,6 +21,7 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         sys.exit(0)
     return result['code'], result['msg'], result['success']
 
+
 def get_code(ss):
     c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do"
     c = ss.get(c_url)
@@ -47,7 +48,7 @@ def get_lecture_list(ss, cookie):
     ss.get(url)
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do"
     form = {"pageSize": 15, "pageNumber": 1}
-    r = ss.get(url)    # r = ss.post(url, data=form)
+    r = ss.get(url)  # r = ss.post(url, data=form)
     response = r.json()
     rows = response['datas']['hdxxxs']['rows']
     stu_count = [[0, 0] for _ in range(len(rows))]
@@ -68,6 +69,7 @@ def get_lecture_info(w_id, ss):
     except Exception:
         print("课程信息获取失败")
         return False
+
 
 def main(cookie):
     user_name = None
@@ -93,18 +95,16 @@ def main(cookie):
             f.write("{}\n".format(user_name).encode())
             f.write("{}\n".format(password).encode())
 
-    print(time.ctime(), "开始登陆")
+    print(time.ctime(), "开始登录")
     s = login_to_ehall(user_name, password)
-    # s = login(user_name, password)
     while s is False or s is None:
-        print("请重新登陆")
+        print("请重新登录")
         user_name = input("请输入学号：")
         password = input("请输入密码：")
-        print("开始登陆")
+        print("开始登录")
         s = login_to_ehall(user_name, password)
-        # s = seu_login(user_name, password )
 
-    print("登陆成功")
+    print("登录成功")
     print("----------------课程列表----------------")
     lecture_list, stu_count = get_lecture_list(s, cookie)
     for index, lecture in enumerate(lecture_list):
@@ -130,10 +130,15 @@ def main(cookie):
         confirm = input(f"确认讲座名称 {lecture_info['JZMC']} (y/n)：").strip()
         if confirm == 'y' or confirm == 'Y':
             break
-    advance_time = int(input("请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议2秒）：").strip())
+    advance_time = int(
+        input("请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议2秒）：").strip())
     current_time = int(time.time())
-    begin_time = int(time.mktime(time.strptime(lecture_info['YYKSSJ'], "%Y-%m-%d %H:%M:%S")))
-    end_time = int(time.mktime(time.strptime(lecture_info['YYJSSJ'], "%Y-%m-%d %H:%M:%S")))
+    begin_time = int(
+        time.mktime(time.strptime(lecture_info['YYKSSJ'],
+                                  "%Y-%m-%d %H:%M:%S")))
+    end_time = int(
+        time.mktime(time.strptime(lecture_info['YYJSSJ'],
+                                  "%Y-%m-%d %H:%M:%S")))
     if current_time > end_time:
         print("抢课时间已结束，大侠请重新来过")
         sys.exit(0)
@@ -156,13 +161,15 @@ def main(cookie):
                     v_code, _ = get_code(ss=s)
                 i += 1
             else:
-                print("当前人数已满，进入等待状态！已等待时间: {}s".format(int(time.time()) - current_time))
+                print("当前人数已满，进入等待状态！已等待时间: {}s".format(
+                    int(time.time()) - current_time))
                 continue
 
         except Exception:
             continue
         finally:
             time.sleep(0.5)
+
 
 # 按间距中的绿色按钮以运行脚本。
 if __name__ == '__main__':
@@ -172,5 +179,3 @@ if __name__ == '__main__':
     except Exception as e:
         print(e)
         print('课程列表列出错误，请将你的cookie赋予lecture_cookie')
-
-
