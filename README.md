@@ -7,6 +7,9 @@
 验证码识别 - ddddocr
 加解密 - pycryptodome
 
+感谢：
+@Golevka2001 @surgery7630 @DgntYang
+
 ## 更新日志
 
 ### 2023/11/7 更新
