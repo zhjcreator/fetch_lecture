@@ -1,7 +1,5 @@
-import configparser
-import json
-
 from seu_auth import seu_login
+
 
 def login_to_ehall(username, password):
     """登录到网上办事服务大厅，用于后续访问网上办事服务大厅的其他应用。
@@ -20,7 +18,6 @@ def login_to_ehall(username, password):
         if not session:
             raise Exception('Login failed')
 
-
         # 更新Headers。UA必填，其他目前无所谓
         session.headers = {
             # 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;'
@@ -31,9 +28,11 @@ def login_to_ehall(username, password):
             # 'DNT': '1',
             # 'Host': 'ehall.seu.edu.cn',
             # 'Upgrade-Insecure-Requests': '1',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                          'Chrome/102.0.0.0 Safari/537.36',
+            'Content-Type':
+            'application/x-www-form-urlencoded',
+            'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/102.0.0.0 Safari/537.36',
         }
 
         # 访问网上办事服务大厅首页
@@ -48,22 +47,13 @@ def login_to_ehall(username, password):
             raise Exception('Cannot get user information')
         if 'userId' in res.json():
             if res.json()['userId'] == username:
-                print('Successfully login to ehall, name:', res.json()['userName'])
+                print(
+                    f'Successfully login to ehall, name: {res.json()["userName"][0]}**'
+                )
             else:
                 raise Exception('Id not match')
         else:
             raise Exception('Cannot get user information')
-
-        res = session.get('http://ehall.seu.edu.cn/jsonp/userDesktopInfo.json')
-
-        json_res = json.loads(res.text)
-
-        try:
-            name = json_res["userName"]
-            print(name[0], "** 登陆成功！")
-        except Exception:
-            print("认证失败！")
-            return False
 
         return session
     except Exception as e:
