@@ -8,7 +8,7 @@
 加解密 - pycryptodome
 
 感谢：
-@Golevka2001 @surgery7630 @DgntYang
+@Golevka2001 @surgery7630 @DgntYang @GeeeekExplorer
 
 ## 更新日志
 
