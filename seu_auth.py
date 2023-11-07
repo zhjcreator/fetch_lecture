@@ -43,15 +43,17 @@ def get_pub_key():
             # 'Accept-Encoding': 'gzip, deflate, br',
             # 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
             # 'Connection': 'keep-alive',
-            'Content-Type': 'application/json',
+            'Content-Type':
+            'application/json',
             # 'Host': 'auth.seu.edu.cn',
             # 'Origin': 'https://auth.seu.edu.cn',
             # 'Referer': 'https://auth.seu.edu.cn/dist/',
             # 'Sec-Fetch-Dest': 'empty',
             # 'Sec-Fetch-Mode': 'cors',
             # 'Sec-Fetch-Site': 'same-origin',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                          'Chrome/115.0.0.0 Safari/537.36'
+            'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/115.0.0.0 Safari/537.36'
         }
         session.headers = headers
         url = 'https://auth.seu.edu.cn/auth/casback/getChiperKey'
@@ -79,11 +81,13 @@ def rsa_encrypt(message, pub_key):
         cipher_text: 加密后的用户密码（base64）
     """
     try:
-        pub_key = pub_key.replace('-', '+').replace('_', '/')  # base64url -> base64
+        pub_key = pub_key.replace('-', '+').replace('_',
+                                                    '/')  # base64url -> base64
         pub_key = '-----BEGIN PUBLIC KEY-----\n' + pub_key + '\n-----END PUBLIC KEY-----'
         rsa_key = RSA.importKey(pub_key)
         cipher = PKCS1_v1_5.new(rsa_key)
-        cipher_text = base64.b64encode(cipher.encrypt(message.encode()))  # base64
+        cipher_text = base64.b64encode(cipher.encrypt(
+            message.encode()))  # base64
 
         print('Successfully encrypt password')
         return cipher_text.decode()
@@ -148,17 +152,3 @@ def seu_login(username, password, service_url=''):
     except Exception as e:
         print('Failed to authenticate, info:', e)
         return None, None
-
-
-# if __name__ == '__main__':
-#     username = ''
-#     password = ''
-#     service_url = 'http://ehall.seu.edu.cn'
-#     session, redirect_url = seu_login(username, password, service_url)
-#     print(redirect_url)
-#     res = session.get(redirect_url)
-#     print(res.text)
-
-
-
-
