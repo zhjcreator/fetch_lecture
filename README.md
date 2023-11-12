@@ -2,21 +2,36 @@
 
 位置：信息门户——>学术交流与文体活动
 
-依赖：
-网络请求 - requests
-验证码识别 - ddddocr
-加解密 - pycryptodome
+依赖：网络请求 - requests，验证码识别 - ddddocr，加解密 - pycryptodome
 
-感谢：
-@Golevka2001 @surgery7630 @DgntYang @GeeeekExplorer
+感谢：@Golevka2001 @surgery7630 @DgntYang @GeeeekExplorer
+
+## 安装依赖
+
+**要求 Python <= 3.9**
+
+```shell
+# 虚拟环境【可选】
+python -m venv lecture_venv
+source lecture_venv/bin/activate
+# 安装依赖
+pip install -r requirements.txt
+```
+
+ddddocr 库体积较大且 pypi.org 访问速度较慢，建议使用镜像源，如：`-i https://pypi.tuna.tsinghua.edu.cn/simple`
 
 ## 更新日志
+
+### 2023/11/12 更新
+
+1. 修复 ddddocr 与 pillow 版本的问题，且限制 python 版本在 3.9 及以下
+2. TODO：[Issue #8](https://github.com/zhjcreator/fetch_lecture/issues/8) 反馈的问题，需等待下一轮预约开放后测试
 
 ### 2023/11/7 更新
 
 1. 修复身份验证问题（没有手动获取 cookie 的必要）
 
-2. 更新依赖（现可支持 python 3.11）
+2. 更新依赖
 
 3. 剔除旧版/无用代码
 

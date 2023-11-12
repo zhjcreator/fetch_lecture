@@ -3,7 +3,7 @@ import json
 import sys
 import time
 
-import ddddocr  # 导入 ddddocr
+import ddddocr  # 要求 python <= 3.9
 
 from seu_auth import seu_login
 
@@ -11,6 +11,7 @@ ocr = ddddocr.DdddOcr()
 
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
+    # FIXME：Issue #8 反馈存在问题，测试发现 cookies 不存在缺少的情况，待下一轮预约开放后修改
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
     data_json = {'HD_WID': hd_wid, 'vcode': ver_code}
     form = {"paramJson": json.dumps(data_json)}
@@ -89,16 +90,30 @@ def get_lecture_list(username: str, password: str):
         return None, None, None
 
 
-def get_lecture_info(w_id, ss):
-    url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxq_cx.do"
-    data_json = {'WID': w_id}
-    r = ss.post(url, data=data_json)
+def print_lecture_list(lecture_list: list):
+    """打印讲座列表
+
+    Args:
+        lecture_list: get_lecture_list()返回的讲座列表
+    """
     try:
-        result = r.json()['datas']['hdxxxq_cx']['rows'][0]
-        return result
-    except Exception:
-        print("课程信息获取失败")
-        return False
+        print("\n----------------课程列表----------------")
+        for index, lecture in enumerate(lecture_list):
+            print('序号：', end='')
+            print(index, end=' ')
+            print("课程wid：", end=" ")
+            print(lecture['WID'], end="  |  ")
+            print("课程名称：", end=" ")
+            print(lecture['JZMC'], end="  |  ")
+            print("预约开始时间：", end=" ")
+            print(lecture['YYKSSJ'], end="  |  ")
+            print("预约结束时间：", end=" ")
+            print(lecture['YYJSSJ'], end="  |  ")
+            print("活动时间：")
+            print(lecture['JZSJ'])
+        print("----------------课程列表end----------------\n")
+    except Exception as e:
+        print('打印讲座列表失败，错误信息：', e)
 
 
 if __name__ == '__main__':
@@ -129,23 +144,7 @@ if __name__ == '__main__':
     ##### 登录 + 爬取课程列表 #####
     print(time.ctime(), "开始登录")
     s, lecture_list, stu_cnt_arr = get_lecture_list(user_name, password)
-    print("登录成功")
-
-    print("----------------课程列表----------------")
-    for index, lecture in enumerate(lecture_list):
-        print('序号：', end='')
-        print(index, end=' ')
-        print("课程wid：", end=" ")
-        print(lecture['WID'], end="  |  ")
-        print("课程名称：", end=" ")
-        print(lecture['JZMC'], end="  |  ")
-        print("预约开始时间：", end=" ")
-        print(lecture['YYKSSJ'], end="  |  ")
-        print("预约结束时间：", end=" ")
-        print(lecture['YYJSSJ'], end="  |  ")
-        print("活动时间：")
-        print(lecture['JZSJ'])
-    print("----------------课程列表end----------------")
+    print_lecture_list(lecture_list)
 
     ##### 选择课程 #####
     lecture_info = False
