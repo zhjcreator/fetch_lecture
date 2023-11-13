@@ -22,6 +22,10 @@ ddddocr 库体积较大且 pypi.org 访问速度较慢，建议使用镜像源�
 
 ## 更新日志
 
+### 2023/11/13 更新
+
+1. 修复 [Issue #8](https://github.com/zhjcreator/fetch_lecture/issues/8) 反馈的问题，错误原因为：身份认证后忘记更新 Headers，Content-Type 没有从 `application/json` 改为 `application/x-www-form-urlencoded`。目前本地测试通过，如仍存在问题请继续反馈。
+
 ### 2023/11/12 更新
 
 1. 修复 ddddocr 与 pillow 版本的问题，且限制 python 版本在 3.9 及以下

@@ -11,10 +11,14 @@ ocr = ddddocr.DdddOcr()
 
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
-    # FIXME：Issue #8 反馈存在问题，测试发现 cookies 不存在缺少的情况，待下一轮预约开放后修改
+    # FIXME：Issue #8 反馈的问题本地测试已解决，待其他人的测试与反馈
     url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
     data_json = {'HD_WID': hd_wid, 'vcode': ver_code}
     form = {"paramJson": json.dumps(data_json)}
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    }
+    ss.headers.update(headers)  # 更新Content-Type [Issue #8]
     r = ss.post(url, data=form)
     result = r.json()
     if result['success'] is not False:
