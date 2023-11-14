@@ -1,10 +1,10 @@
-# 东南大学 人文与科学素养系列 抢课
+![image](https://github.com/zhjcreator/fetch_lecture/assets/55911606/744c9a1c-f84f-453e-b66b-ab63c944fc28)# 东南大学 人文与科学素养系列 抢课
 
 位置：信息门户——>学术交流与文体活动
 
 依赖：网络请求 - requests，验证码识别 - ddddocr，加解密 - pycryptodome
 
-感谢：@Golevka2001 @surgery7630 @DgntYang @GeeeekExplorer
+感谢：[@Golevka2001](https://github.com/Golevka2001) [@surgery7630](https://github.com/surgery7630) [@DgntYang](https://github.com/DgntYang) [@GeeeekExplorer](https://github.com/GeeeekExplorer)
 
 ## 安装依赖
 
