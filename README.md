@@ -1,4 +1,4 @@
-![image](https://github.com/zhjcreator/fetch_lecture/assets/55911606/744c9a1c-f84f-453e-b66b-ab63c944fc28)# 东南大学 人文与科学素养系列 抢课
+# 东南大学 人文与科学素养系列 抢课
 
 位置：信息门户——>学术交流与文体活动
 
