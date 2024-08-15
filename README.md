@@ -20,6 +20,13 @@ pip install -r requirements.txt
 
 ddddocr 库体积较大且 pypi.org 访问速度较慢，建议使用镜像源，如：`-i https://pypi.tuna.tsinghua.edu.cn/simple`
 
+## To Do List
+- [ ] 添加Windows/Linux/MacOS GUI界面（暂定layui+pywebview，后续考虑使用flutter）
+- [ ] 添加多账户多线程功能（考虑到单ip访问频率限制，可能需要支持代理）
+- [ ] 添加捡漏功能
+- [ ] 添加安卓客户端（ddddocr不支持安卓，需寻求其他方案，暂时搁置）
+
+
 ## 更新日志
 
 ### 2023/11/13 更新

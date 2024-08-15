@@ -1,4 +1,4 @@
-ddddocr~=1.4.8
-requests~=2.31.0
-pillow==9.5.0
-pycryptodome~=3.19.0
+pywebview~=5.1
+ddddocr~=1.5.5
+requests~=2.32.3
+pycryptodome~=3.20.0
