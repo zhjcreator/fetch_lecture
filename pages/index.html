@@ -8,17 +8,64 @@
 
 </head>
 <body>
-<div class="layui-container">
+<div class="layui-container" style="height: 100vh">
 
-    <div class="layui-row">
-        <div class="layui-col-xs12 layui-col-sm8">
-            <div class="grid-demo grid-demo-bg1">xs:12/12 | md:8/12</div>
+    <div class="layui-row" style="height: 100vh">
+        <div class="layui-col-xs12 layui-col-sm8" style="padding: 1% 1%;">
+            <div class="layui-panel" style="height: 90vh">
+                <div style="padding: 32px ">
+                    <!--登录界面-->
+                    <form class="layui-form">
+                        <div class="demo-login-container">
+                            <div class="layui-form-item">
+                                <div class="layui-input-wrap">
+                                    <div class="layui-input-prefix">
+                                        <i class="layui-icon layui-icon-username"></i>
+                                    </div>
+                                    <input type="text" name="student_id" value="" lay-verify="required"
+                                           placeholder="学 号  " lay-reqtext="请填写学号" autocomplete="off"
+                                           class="layui-input" lay-affix="clear">
+                                </div>
+                            </div>
+                            <div class="layui-form-item">
+                                <div class="layui-input-wrap">
+                                    <div class="layui-input-prefix">
+                                        <i class="layui-icon layui-icon-password"></i>
+                                    </div>
+                                    <input type="password" name="password" value="" lay-verify="required"
+                                           placeholder="密   码" lay-reqtext="请填写密码" autocomplete="off"
+                                           class="layui-input" lay-affix="eye">
+                                </div>
+                            </div>
+
+                            <div class="layui-form-item">
+                                <div class="layui-col-xs9 layui-col-sm9">
+                                    <button class="layui-btn  layui-btn-fluid" lay-submit lay-filter="demo-login">
+                                        登录
+                                    </button>
+                                </div>
+
+                                <div class="layui-col-xs3 layui-col-sm3">
+                                    <div style="display: flex; justify-content: center; align-items: center; ">
+                                    <input type="checkbox" name="CCC" title="记住密码|直接登录" lay-skin="switch">
+                                </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                    </form>
+                </div>
+            </div>
         </div>
-        <div class="layui-col-xs12 layui-col-sm4">
-            <div class="grid-demo">xs:12/12 | md:4/12</div>
+        <div class="layui-col-xs12 layui-col-sm4" style="padding: 1% 1%">
+            <div class="layui-panel">
+                <div style="padding: 32px">面板任意内容</div>
+            </div>
         </div>
     </div>
 </div>
+<script src="//unpkg.com/layui@2.9.14/dist/layui.js"></script>
 
 </body>
 </html>

@@ -1,9 +1,8 @@
 import webview
 
-
-def custom_logic(window):
-    window.evaluate_js('alert("Nice one brother")')
+from api import API
 
 
-window = webview.create_window('Woah dude!', 'pages/index.html')
-webview.start(custom_logic, window)
+api=API()
+window = webview.create_window('Woah dude!', 'pages/index.html',js_api=api)
+webview.start()

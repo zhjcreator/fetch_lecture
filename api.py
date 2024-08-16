@@ -28,8 +28,11 @@ def encrypt_yaml(yaml_data):
 def decrypt_yaml():
     with open('accounts.yml', 'r') as f:
         yaml_data = yaml.load(f, Loader=yaml.FullLoader)
-    for account in yaml_data:
-        account['password'] = base64.b64decode(account['password'].encode()).decode()
+    if yaml_data is None:
+        return []
+    else:
+        for account in yaml_data:
+            account['password'] = base64.b64decode(account['password'].encode()).decode()
 
     return yaml_data
 
@@ -107,6 +110,7 @@ def seu_login(username, password, service_url=''):
 
 class API:
     def __init__(self):
+        self.session = None
         self.accounts = None
         self.load_account_list()
 
@@ -115,9 +119,10 @@ class API:
         if not os.path.exists('accounts.yml'):
             with open('accounts.yml', 'w') as f:
                 f.write('')
-
-        # 使用yaml读取accounts.yml
-        self.accounts = decrypt_yaml()
+            self.accounts = []
+        else:
+            # 使用yaml读取accounts.yml
+            self.accounts = decrypt_yaml()
 
     def get_account_list(self):
         # 去除account中的password，并以json格式返回
@@ -129,13 +134,47 @@ class API:
             } for account in self.accounts
         ]
 
+    # 添加账号时，先尝试登录，确认账号有效，再添加
     def add_account(self, name: str, student_id: str, password: str, comment: str):
-        # 添加账号
-        self.accounts.append({
-            'name': name,
-            'student_id': student_id,
-            'password': password,
-            'comment': comment
-        })
-        # 写入accounts.yml
-        encrypt_yaml(self.accounts)
+        login_result = seu_login(student_id, password)
+        if not login_result['success']:
+            return [False, login_result['info']]
+        else:
+            # 添加账号
+            self.accounts.append({
+                'name': name,
+                'student_id': student_id,
+                'password': password,
+                'comment': comment
+            })
+            # 写入accounts.yml
+            encrypt_yaml(self.accounts)
+            return [True, '添加成功']
+
+    def login(self, student_id: str, password: str = None):
+        direct_login = True if password is None else False
+        if direct_login:
+            login_result = seu_login(student_id, password)
+            if not login_result['success']:
+                return [False, login_result['info']]
+            else:
+                self.session = login_result['session']
+                return [True, login_result['redirectUrl']]
+
+        # 从self.accounts中找到student_id对应的密码
+        for account in self.accounts:
+            if account['student_id'] == student_id:
+                password = account['password']
+
+        if password is None:
+            return [False, '账号不存在']
+
+        login_result = seu_login(student_id, password)
+        if not login_result['success']:
+            # 删除账号
+            self.accounts = [account for account in self.accounts if account['student_id'] != student_id]
+            encrypt_yaml(self.accounts)
+            return [False, '登录失败，账号已删除，错误信息：' + login_result['info']]
+
+        self.session = login_result['session']
+        return [True, login_result['redirectUrl']]
