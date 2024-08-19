@@ -5,18 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>登录</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/layui/2.9.14/css/layui.css" rel="stylesheet">
+    <style>
+        .center-text {
+            text-align: center;
+        }
+
+        .login_font {
+            font-size: 3em;
+            color: black;
+            padding-bottom: 1em;
+            margin: 0;
+            text-align: center;
+        }
+    </style>
 
 </head>
 <body>
-<div class="layui-container" style="height: 100vh">
+<div class="layui-container" style="height: 90vh">
 
-    <div class="layui-row" style="height: 100vh">
+    <div class="layui-row" style="height: 90vh">
         <div class="layui-col-xs12 layui-col-sm8" style="padding: 1% 1%;">
-            <div class="layui-panel" style="height: 90vh">
+            <div class="layui-panel">
                 <div style="padding: 32px ">
                     <!--登录界面-->
-                    <form class="layui-form">
+                    <form class="layui-form" lay-filter="form-login">
                         <div class="demo-login-container">
+                            <div class="login_font">登录/添加新账号</div>
                             <div class="layui-form-item">
                                 <div class="layui-input-wrap">
                                     <div class="layui-input-prefix">
@@ -40,15 +54,17 @@
 
                             <div class="layui-form-item">
                                 <div class="layui-col-xs9 layui-col-sm9">
-                                    <button class="layui-btn  layui-btn-fluid" lay-submit lay-filter="demo-login">
+                                    <!--<button class="layui-btn  layui-btn-fluid" lay-submit lay-filter="demo-login">-->
+                                    <button class="layui-btn  layui-btn-fluid" id="login_button">
                                         登录
                                     </button>
                                 </div>
 
                                 <div class="layui-col-xs3 layui-col-sm3">
                                     <div style="display: flex; justify-content: center; align-items: center; ">
-                                    <input type="checkbox" name="CCC" title="记住密码|直接登录" lay-skin="switch">
-                                </div>
+                                        <input type="checkbox" name="save_account" title="记住密码|直接登录"
+                                               lay-skin="switch">
+                                    </div>
                                 </div>
 
                             </div>
@@ -59,6 +75,9 @@
             </div>
         </div>
         <div class="layui-col-xs12 layui-col-sm4" style="padding: 1% 1%">
+            <div class="center-text">
+                <h2>已有账号</h2>
+            </div>
             <div class="layui-panel">
                 <div style="padding: 32px">面板任意内容</div>
             </div>
@@ -66,6 +85,58 @@
     </div>
 </div>
 <script src="//unpkg.com/layui@2.9.14/dist/layui.js"></script>
+<script>
+    function showResponse(response) {
+        var container = document.getElementById('response-container')
+
+        container.innerText = response.message
+        container.style.display = 'block'
+    }
+
+
+    layui.use(function () {
+        var $ = layui.$;
+        var form = layui.form;
+        var layer = layui.layer;
+        // 提交事件
+        // form.on('submit(demo-login)', function (data) {
+        //     const field = data.field; // 获取表单字段值
+        //     const student_id = field.student_id;
+        //     const password = field.password;
+        //
+        //     var login_result = pywebview.api.login(student_id, password)
+        //     console.log(login_result)
+        //     layer.alert(JSON.stringify(field), {
+        //         login_result
+        //     });
+        //     showResponse(login_result)
+        //     return false; // 阻止默认 form 跳转
+        // });
+        $('#login_button').on('click', function () {
+            form.submit('form-login', function (data) {
+                var field = data.field; // 获取表单全部字段值
+                console.log(data); // 回调函数返回的 data 参数和提交事件中返回的一致
+                // 执行提交
+                // layer.confirm('确定提交吗？', function (index) {
+                //     layer.close(index); // 关闭确认提示框
+                //     // 显示填写结果，仅作演示用
+                //     layer.alert(JSON.stringify(field), {
+                //         title: '当前填写的字段值'
+                //     });
+                //     // 此处可执行 Ajax 等操作
+                //     // …
+                // });
+                const student_id = field.student_id;
+                const password = field.password;
+
+                var login_result = pywebview.api.login(student_id, password);
+                console.log(login_result)
+
+            });
+            return false;
+        });
+    });
+</script>
 
 </body>
 </html>

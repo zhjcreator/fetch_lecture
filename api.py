@@ -82,7 +82,7 @@ def seu_login(username, password, service_url=''):
             'username': username,
             'wxBinded': False,
         }
-        res = session.post(url=url, data=data)  # 直接使用data参数
+        res = session.post(url=url, data=json.dumps(data))  # 直接使用data参数
 
         if res.status_code != 200:
             result['info'] = f'HTTP状态码 {res.status_code}: {res.reason}'
@@ -130,7 +130,8 @@ class API:
             {
                 'name': account['name'],
                 'student_id': account['student_id'],
-                'comment': account['comment']
+                'comment': account['comment'],
+                'validity': account['validity']
             } for account in self.accounts
         ]
 
@@ -145,7 +146,8 @@ class API:
                 'name': name,
                 'student_id': student_id,
                 'password': password,
-                'comment': comment
+                'comment': comment,
+                'validity': True
             })
             # 写入accounts.yml
             encrypt_yaml(self.accounts)
@@ -153,13 +155,16 @@ class API:
 
     def login(self, student_id: str, password: str = None):
         direct_login = True if password is None else False
+        result = {'success': False, 'info': None}
         if direct_login:
             login_result = seu_login(student_id, password)
+            result['info'] = login_result['info']
             if not login_result['success']:
-                return [False, login_result['info']]
+                return result
             else:
                 self.session = login_result['session']
-                return [True, login_result['redirectUrl']]
+                result['success'] = True
+                return result
 
         # 从self.accounts中找到student_id对应的密码
         for account in self.accounts:
@@ -167,14 +172,22 @@ class API:
                 password = account['password']
 
         if password is None:
-            return [False, '账号不存在']
+            result['info'] = '账号不存在'
+            return result
 
         login_result = seu_login(student_id, password)
         if not login_result['success']:
-            # 删除账号
-            self.accounts = [account for account in self.accounts if account['student_id'] != student_id]
-            encrypt_yaml(self.accounts)
-            return [False, '登录失败，账号已删除，错误信息：' + login_result['info']]
+            # 有效性改为false
+            for account in self.accounts:
+                if account['student_id'] == student_id:
+                    account['validity'] = False
+                # 写入accounts.yml
+                encrypt_yaml(self.accounts)
+                result['info'] = login_result['info']
+                result['success'] = login_result['success']
+                return result
 
         self.session = login_result['session']
-        return [True, login_result['redirectUrl']]
+        result['info'] = login_result['info']
+        result['success'] = True
+        return result
