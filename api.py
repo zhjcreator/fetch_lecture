@@ -139,7 +139,7 @@ class API:
     def add_account(self, name: str, student_id: str, password: str, comment: str):
         login_result = seu_login(student_id, password)
         if not login_result['success']:
-            return [False, login_result['info']]
+            return {'success': False, 'info': login_result['info']}
         else:
             # 添加账号
             self.accounts.append({
@@ -151,10 +151,10 @@ class API:
             })
             # 写入accounts.yml
             encrypt_yaml(self.accounts)
-            return [True, '添加成功']
+            return {'success': True, 'info': '添加成功'}
 
     def login(self, student_id: str, password: str = None):
-        direct_login = True if password is None else False
+        direct_login = True if password is not None else False
         result = {'success': False, 'info': None}
         if direct_login:
             login_result = seu_login(student_id, password)
