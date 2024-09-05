@@ -17,6 +17,32 @@
             margin: 0;
             text-align: center;
         }
+
+        .card-filp {
+            height: 10vh;
+            margin: 12px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: 1s;
+        }
+
+        .front,
+        .back {
+            height: 100%;
+            width: 100%;
+            position: absolute;
+            left: 0;
+            top: 0;
+            backface-visibility: hidden
+        }
+
+        .back {
+            transform: rotateY(180deg);
+        }
+
+        .card-filp:hover {
+            transform: rotateY(180deg);
+        }
     </style>
 
 </head>
@@ -25,7 +51,7 @@
 
     <div class="layui-row" style="height: 90vh">
         <div class="layui-col-xs12 layui-col-sm8" style="padding: 1% 1%;">
-            <div class="layui-panel">
+            <div class="layui-panel" style="height: 80vh">
                 <div style="padding: 32px ">
                     <!--登录界面-->
                     <form class="layui-form" lay-filter="form-login">
@@ -94,39 +120,45 @@
                 </div>
             </div>
         </div>
-        <div class="layui-col-xs12 layui-col-sm4" style="padding: 1% 1%; height: 90vh">
+        <div class="layui-col-xs12 layui-col-sm4" style="padding: 1% 1%; height: 80vh">
             <div class="center-text">
-                <h2>已有账号</h2>
-            </div>
-            <div style="overflow: auto;height: 90vh">
+                <h2>已有账号
+                    <button type="button" class="layui-btn layui-btn-sm layui-btn-primary"
+                            onclick="refresh_student_list()">
+                        <i class="layui-icon layui-icon-refresh-3"></i>
+                    </button>
+                </h2>
 
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
+            </div>
+            <div style="height: 75vh;overflow: auto" id="user_list_div">
+
+                <div class="card-filp">
+                    <div class="layui-panel front">
+                        <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
+                            <div>
+                                无历史用户，请添加 <span class="layui-badge">无效</span>
+                                <p>
+                                    无历史用户，请添加 <span class="layui-badge">无效</span>
+                                <p>
+                                    无历史用户，请添加 <span class="layui-badge">无效</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="layui-panel back">
+                        <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
+                            <button type="button" class="layui-btn layui-btn-normal layui-btn-radius"
+                                    onclick="delete_user(230249456)">登录
+                            </button>
+                            <button type="button" class="layui-btn layui-btn-danger layui-btn-radius"
+                                    onclick="login(230249456)">删除
+                            </button>
+                        </div>
+                    </div>
+
                 </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
-                <div class="layui-panel">
-                    <div style="padding: 32px">面板任意内容</div>
-                </div>
+
+
             </div>
 
         </div>
@@ -147,7 +179,6 @@
 
                 const login_result = pywebview.api.login(student_id, password);
                 login_result.then(function (result) {
-                    console.log(result['success'])
                     if (result['success']) {
                         // 登录成功
                         if (field.save_account) {
@@ -165,8 +196,9 @@
                                     layer.alert(result['info'])
                                 }
                             })
+                        } else {
+                            layer.alert('登录成功')
                         }
-                        layer.alert('登录成功')
                     } else {
                         // 登录失败
                         layer.alert(result['info'])
@@ -188,7 +220,7 @@
             const elem = data.elem; // 获得 checkbox 原始 DOM 对象
             const name_div = document.getElementById('form-div-name');
             const comment_div = document.getElementById('form-div-comment');
-            if (elem.checked){
+            if (elem.checked) {
                 name_div.style.display = 'block';
                 comment_div.style.display = 'block';
                 layer.msg('记住账号与密码')
@@ -202,5 +234,74 @@
 
     });
 </script>
+<script>
+    window.addEventListener('pywebviewready', function () {
+        console.log(' pywebview is ready')
+        refresh_student_list()
+    })
+
+    function refresh_student_list() {
+        const container = document.getElementById('user_list_div');
+        pywebview.api.get_account_list().then(function (result) {
+            // 判断账号列表是否为空
+            if (result.length === 0) {
+                return;
+            }
+            // 清除其中内容
+            while (container.firstChild) {
+                container.removeChild(container.firstChild);
+            }
+            let student;
+            for (student of result) {
+                let card = create_student_card(student);
+                console.log(student)
+                container.appendChild(card);
+            }
+        })
+    }
+
+    function create_student_card(student) {
+        let valid_str = ''
+        if (student.validity) {
+            valid_str = '<span class="layui-badge layui-bg-blue">有效</span>';
+        } else {
+            valid_str = '<span class="layui-badge">无效</span>';
+        }
+
+        const card = document.createElement('div');
+        card.className = 'card-filp';
+
+        const front = document.createElement('div');
+        front.className = 'layui-panel front';
+        card.appendChild(front);
+        front.innerHTML = `
+            <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
+              <div>
+                姓名：${student.name} ${valid_str}<p>
+                学号：${student.student_id}<p>
+                备注：${student.comment}<p>
+              </div>
+            </div>
+        `;
+
+        const back = document.createElement('div');
+        back.className = 'layui-panel back';
+        card.appendChild(back);
+
+        back.innerHTML = `
+                        <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
+                            <button type="button" class="layui-btn layui-btn-normal layui-btn-radius"
+                                    onclick="delete_user(${student.student_id})">登录
+                            </button>
+                            <button type="button" class="layui-btn layui-btn-danger layui-btn-radius"
+                                    onclick="login(${student.student_id})">删除
+                            </button>
+                        </div>
+        `;
+
+        return card;
+    }
+</script>
+
 </body>
 </html>

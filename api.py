@@ -20,13 +20,13 @@ def encrypt_yaml(yaml_data):
     for account in yaml_data:
         account['password'] = base64.b64encode(account['password'].encode()).decode()
 
-    with open('accounts.yml', 'w') as f:
-        yaml.dump(yaml_data, f)
+    with open('accounts.yml', 'w',encoding='utf-8') as f:
+                yaml.dump(yaml_data, f)
 
 
 # 读取yaml
 def decrypt_yaml():
-    with open('accounts.yml', 'r') as f:
+    with open('accounts.yml', 'r',encoding='utf-8') as f:
         yaml_data = yaml.load(f, Loader=yaml.FullLoader)
     if yaml_data is None:
         return []
@@ -126,6 +126,7 @@ class API:
 
     def get_account_list(self):
         # 去除account中的password，并以json格式返回
+        print('获取账号列表...')
         return [
             {
                 'name': account['name'],
@@ -141,6 +142,15 @@ class API:
         if not login_result['success']:
             return {'success': False, 'info': login_result['info']}
         else:
+            # 先检查是否有重复,如果有，则替换
+            for account in self.accounts:
+                if account['student_id'] == student_id:
+                    account['password'] = password
+                    account['comment'] = comment
+                    account['validity'] = True
+                    encrypt_yaml(self.accounts)
+                    return {'success': True, 'info': '账号已存在，已替换'}
+
             # 添加账号
             self.accounts.append({
                 'name': name,
