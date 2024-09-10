@@ -148,10 +148,10 @@
                     <div class="layui-panel back">
                         <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
                             <button type="button" class="layui-btn layui-btn-normal layui-btn-radius"
-                                    onclick="delete_user(230249456)">登录
+                                    onclick="login('2306794234')">登录
                             </button>
                             <button type="button" class="layui-btn layui-btn-danger layui-btn-radius"
-                                    onclick="login(230249456)">删除
+                                    onclick="delete_user('2302434345')">删除
                             </button>
                         </div>
                     </div>
@@ -199,6 +199,7 @@
                         } else {
                             layer.alert('登录成功')
                         }
+                        window.location.replace('/fetch.html');
                     } else {
                         // 登录失败
                         layer.alert(result['info'])
@@ -291,15 +292,44 @@
         back.innerHTML = `
                         <div style="display: flex;justify-content: center; align-items: center; height: 100%;">
                             <button type="button" class="layui-btn layui-btn-normal layui-btn-radius"
-                                    onclick="delete_user(${student.student_id})">登录
+                                    onclick="login(${student.student_id})">登录
                             </button>
                             <button type="button" class="layui-btn layui-btn-danger layui-btn-radius"
-                                    onclick="login(${student.student_id})">删除
+                                    onclick="delete_user(${student.student_id})">删除
                             </button>
                         </div>
         `;
 
         return card;
+    }
+
+    function login(student_id) {
+        student_id=student_id.toString()
+        pywebview.api.login(student_id).then(function (result) {
+            if (result['success']) {
+                // 登录成功
+                layer.alert('登录成功')
+                window.location.replace('/fetch.html');
+            } else {
+                // 登录失败
+                layer.alert(result['info'])
+                refresh_student_list()
+            }
+        })
+    }
+
+    function delete_user(student_id) {
+        student_id=student_id.toString()
+        pywebview.api.delete_account(student_id).then(function (result) {
+            if (result['success']) {
+                // 删除成功
+                layer.alert('删除成功')
+                refresh_student_list()
+            } else {
+                // 删除失败
+                layer.alert(result['info'])
+            }
+        })
     }
 </script>
 

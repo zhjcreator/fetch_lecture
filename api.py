@@ -9,6 +9,8 @@
 import json
 import os
 import base64
+
+import ddddocr
 import yaml
 from urllib.parse import unquote
 
@@ -20,13 +22,13 @@ def encrypt_yaml(yaml_data):
     for account in yaml_data:
         account['password'] = base64.b64encode(account['password'].encode()).decode()
 
-    with open('accounts.yml', 'w',encoding='utf-8') as f:
-                yaml.dump(yaml_data, f)
+    with open('accounts.yml', 'w', encoding='utf-8') as f:
+        yaml.dump(yaml_data, f)
 
 
 # 读取yaml
 def decrypt_yaml():
-    with open('accounts.yml', 'r',encoding='utf-8') as f:
+    with open('accounts.yml', 'r', encoding='utf-8') as f:
         yaml_data = yaml.load(f, Loader=yaml.FullLoader)
     if yaml_data is None:
         return []
@@ -107,11 +109,22 @@ def seu_login(username, password, service_url=''):
         result['info'] = f'登录失败！原因：{str(e)}'
         return result
 
+def get_code(ss):
+    ocr = ddddocr.DdddOcr()
+
+    c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do"
+    c = ss.get(c_url)
+    c_r = c.json()
+    c_img = base64.b64decode(c_r['result'].split(',')[1])
+    c = ocr.classification(c_img)
+    return c, c_img
 
 class API:
     def __init__(self):
         self.session = None
         self.accounts = None
+        self.student_id = None
+        self.password = None
         self.load_account_list()
 
     def load_account_list(self):
@@ -163,6 +176,14 @@ class API:
             encrypt_yaml(self.accounts)
             return {'success': True, 'info': '添加成功'}
 
+    def delete_account(self, student_id: str):
+        for account in self.accounts:
+            if account['student_id'] == student_id:
+                self.accounts.remove(account)
+                encrypt_yaml(self.accounts)
+                return {'success': True, 'info': '删除成功'}
+        return {'success': False, 'info': '账号不存在'}
+
     def login(self, student_id: str, password: str = None):
         direct_login = True if password is not None else False
         result = {'success': False, 'info': None}
@@ -200,4 +221,67 @@ class API:
         self.session = login_result['session']
         result['info'] = login_result['info']
         result['success'] = True
+        self.student_id = student_id
+        self.password = password
         return result
+
+    def get_lecture_list(self):
+        result = {
+            'success': False,
+            'info': None,
+            'data': None
+        }
+        try:
+            service_url = 'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do'
+            login_info = seu_login(self.student_id, self.password, service_url)
+            if not login_info['session']:
+                result['info'] = '统一身份认证平台登录失败'
+                raise Exception('统一身份认证平台登录失败')
+            if not login_info['redirectUrl']:
+                result['info'] = '获取重定向url失败'
+                raise Exception('获取重定向url失败')
+            self.session = login_info['session']
+            redirect_url = login_info['redirectUrl']
+
+            # 访问研究生素质讲座系统页面
+            res = self.session.get(redirect_url)
+            if res.status_code != 200:
+                result['info'] = f'访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]'
+                raise Exception(f'访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]')
+            # 获取所有讲座信息
+            res = self.session.post(
+                'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do',
+                data={
+                    'pageSize': 100,
+                    'pageNumber': 1
+                })
+            if res.status_code != 200:
+                result['info'] = f'POST请求失败[{res.status_code}, {res.reason}]'
+                raise Exception(f'POST请求失败[{res.status_code}, {res.reason}]')
+            raw_lecture_list = res.json()['datas']['hdxxxs']['rows']
+            stu_cnt_arr = [[0, 0] for _ in range(len(raw_lecture_list))]
+            for i, lecture in enumerate(raw_lecture_list):
+                stu_cnt_arr[i][0] = int(lecture['HDZRS'])
+                stu_cnt_arr[i][1] = int(lecture['YYRS'])
+            result_data = []
+            for raw_lecture in raw_lecture_list:
+                result_data.append({
+                    'wid': raw_lecture['WID'],
+                    'lecture_name': raw_lecture['JZMC'],
+                    'begin_time': raw_lecture['YYKSSJ'],
+                    'end_time': raw_lecture['YYJSSJ'],
+                    'event_time': raw_lecture['JZSJ']
+                })
+            result['data'] = result_data
+            result['success'] = True
+            return result
+        except Exception as e:
+            print('获取讲座列表失败，错误信息：', e)
+            result['info'] = str(e)
+            return result
+
+    def fetch_lecture_loop(self, hd_wid: str):
+        pass
+
+    def fetch_lecture(self, hd_wid: str):
+        pass
