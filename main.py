@@ -16,7 +16,16 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
     data_json = {'HD_WID': hd_wid, 'vcode': ver_code}
     form = {"paramJson": json.dumps(data_json)}
     headers = {
+        'Host': 'ehall.seu.edu.cn',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Origin': 'https://ehall.seu.edu.cn',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
+        'Referer': 'https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
     }
     ss.headers.update(headers)  # 更新Content-Type [Issue #8]
     r = ss.post(url, data=form)
@@ -28,8 +37,10 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
 
 
 def get_code(ss):
-    c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do"
-    c = ss.get(c_url)
+    c_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_=" + str(
+        int(time.time() * 1000)
+    )
+    c = ss.post(c_url)
     c_r = c.json()
     c_img = base64.b64decode(c_r['result'].split(',')[1])
     c = ocr.classification(c_img)
@@ -69,19 +80,27 @@ def get_lecture_list(username: str, password: str):
             raise Exception('获取重定向url失败')
 
         # 访问研究生素质讲座系统页面
-        res = session.get(redirect_url)
+        res = session.get(redirect_url, verify=False)
         if res.status_code != 200:
             raise Exception(f'访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]')
         # 获取所有讲座信息
+        # res = session.post(
+        #     'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do',
+        #     data={'pageSize': 100, 'pageNumber': 1},
+        # )
         res = session.post(
-            'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do',
+            'https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_='
+            + str(int(time.time() * 1000)),
             data={
+                'pageIndex': 1,
                 'pageSize': 100,
-                'pageNumber': 1
-            })
+                'sortField': None,
+                'sortOrder': None,
+            },
+        )
         if res.status_code != 200:
             raise Exception(f'POST请求失败[{res.status_code}, {res.reason}]')
-        lecture_list = res.json()['datas']['hdxxxs']['rows']
+        lecture_list = res.json()['datas']
         stu_cnt_arr = [[0, 0] for _ in range(len(lecture_list))]
         for i, lecture in enumerate(lecture_list):
             stu_cnt_arr[i][0] = int(lecture['HDZRS'])
@@ -174,7 +193,10 @@ if __name__ == '__main__':
     while current_time < begin_time - advance_time:
         current_time = int(time.time())
         print('等待{}秒'.format(begin_time - advance_time - current_time))
-        time.sleep(1)
+        if begin_time - advance_time - current_time < 5:
+            time.sleep(0.51)
+        else:
+            time.sleep(1)
 
     ##### 抢 #####
     print(time.ctime(), '开始抢课')
