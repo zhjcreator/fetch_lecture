@@ -9,12 +9,20 @@
 import json
 import os
 import base64
+import time
 
 import ddddocr
 import yaml
 from urllib.parse import unquote
 
+from bottle import redirect
+
 from seu_auth import get_pub_key, rsa_encrypt
+
+from fake_useragent import UserAgent
+
+ua = UserAgent()
+headers = {'User-Agent': ua.random}
 
 
 # 加密存储yaml，假装安全
@@ -109,6 +117,7 @@ def seu_login(username, password, service_url=''):
         result['info'] = f'登录失败！原因：{str(e)}'
         return result
 
+
 def get_code(ss):
     ocr = ddddocr.DdddOcr()
 
@@ -119,12 +128,14 @@ def get_code(ss):
     c = ocr.classification(c_img)
     return c, c_img
 
+
 class API:
     def __init__(self):
         self.session = None
         self.accounts = None
         self.student_id = None
         self.password = None
+        self.redirect_url=None
         self.load_account_list()
 
     def load_account_list(self):
@@ -186,10 +197,12 @@ class API:
 
     def login(self, student_id: str, password: str = None):
         direct_login = True if password is not None else False
+        service_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"
         result = {'success': False, 'info': None}
         if direct_login:
-            login_result = seu_login(student_id, password)
+            login_result = seu_login(student_id, password,service_url=service_url)
             result['info'] = login_result['info']
+            self.redirect_url = login_result['redirectUrl']
             if not login_result['success']:
                 return result
             else:
@@ -206,7 +219,8 @@ class API:
             result['info'] = '账号不存在'
             return result
 
-        login_result = seu_login(student_id, password)
+        login_result = seu_login(student_id, password, service_url = service_url)
+        self.redirect_url = login_result['redirectUrl']
         if not login_result['success']:
             # 有效性改为false
             for account in self.accounts:
@@ -232,46 +246,44 @@ class API:
             'data': None
         }
         try:
-            service_url = 'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do'
-            login_info = seu_login(self.student_id, self.password, service_url)
-            if not login_info['session']:
-                result['info'] = '统一身份认证平台登录失败'
-                raise Exception('统一身份认证平台登录失败')
-            if not login_info['redirectUrl']:
-                result['info'] = '获取重定向url失败'
-                raise Exception('获取重定向url失败')
-            self.session = login_info['session']
-            redirect_url = login_info['redirectUrl']
+            if self.redirect_url is None:
+                raise Exception('未获得重定向url')
 
             # 访问研究生素质讲座系统页面
-            res = self.session.get(redirect_url)
+            res = self.session.get(self.redirect_url, verify=False)
             if res.status_code != 200:
-                result['info'] = f'访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]'
-                raise Exception(f'访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]')
+                raise Exception(
+                    f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]"
+                )
+
             # 获取所有讲座信息
-            res = self.session.post(
-                'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do',
-                data={
-                    'pageSize': 100,
-                    'pageNumber': 1
-                })
+            res = self.session.post("https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_="
+                                    + str(int(time.time() * 1000)),
+                                    data={
+                                        "pageIndex": 1,
+                                        "pageSize": 100,
+                                        "sortField": None,
+                                        "sortOrder": None,
+                                    })
             if res.status_code != 200:
                 result['info'] = f'POST请求失败[{res.status_code}, {res.reason}]'
                 raise Exception(f'POST请求失败[{res.status_code}, {res.reason}]')
-            raw_lecture_list = res.json()['datas']['hdxxxs']['rows']
-            stu_cnt_arr = [[0, 0] for _ in range(len(raw_lecture_list))]
-            for i, lecture in enumerate(raw_lecture_list):
-                stu_cnt_arr[i][0] = int(lecture['HDZRS'])
-                stu_cnt_arr[i][1] = int(lecture['YYRS'])
+            raw_lecture_list = res.json()['datas']
             result_data = []
             for raw_lecture in raw_lecture_list:
                 result_data.append({
                     'wid': raw_lecture['WID'],
                     'lecture_name': raw_lecture['JZMC'],
-                    'begin_time': raw_lecture['YYKSSJ'],
-                    'end_time': raw_lecture['YYJSSJ'],
-                    'event_time': raw_lecture['JZSJ']
+                    'order_begin_time': raw_lecture['YYKSSJ'],
+                    'order_end_time': raw_lecture['YYJSSJ'],
+                    'event_begin_time': raw_lecture['JZSJ'],
+                    'event_end_time': raw_lecture['HDJSSJ'],
+                    # 地点
+                    'location': raw_lecture['JZDD'],
+                    # 嘉宾
+                    'guest': raw_lecture['ZJR'],
                 })
+            print(result_data)
             result['data'] = result_data
             result['success'] = True
             return result
