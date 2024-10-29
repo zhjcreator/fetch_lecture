@@ -21,6 +21,10 @@ pip install -r requirements.txt
 ddddocr 库体积较大且 pypi.org 访问速度较慢，建议使用镜像源，如：`-i https://pypi.tuna.tsinghua.edu.cn/simple`
 
 ## 更新日志
+### 2024/10/29 更新
+
+验证码、预约功能已恢复，但是发现验证码识别正确率偏低，以及经常触发“请勿多设备登录……” [@Golevka2001](https://github.com/Golevka2001)
+
 
 ### 2023/11/13 更新
 
