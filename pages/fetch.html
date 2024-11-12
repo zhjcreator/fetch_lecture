@@ -1,57 +1,20 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>抢讲座</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/layui/2.9.14/css/layui.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>Title</title>
 </head>
 <body>
-<div class="layui-container" style="height: 90vh">
-    <table class="layui-hide" id="lectures_table">
-    </table>
-
+<div>
+    <H1>
+        获取iframe页面传递的参数: <span id="lectureId"></span>
+    </H1>
 </div>
-<script src="//unpkg.com/layui@2.9.14/dist/layui.js"></script>
-
 <script>
-    layui.use('table', function () {
-        var table = layui.table;
-
-        // 已知数据渲染
-        const inst = table.render({
-            elem: '#lectures_table',
-            cols: [[ //标题栏
-                {field: 'wid', title: 'ID', sort: true},
-                {field: 'lecture_name', title: '讲座名'},
-                {field: 'location', title: '位置', sort: true},
-                {field: 'guest', title: '嘉宾', sort: true},
-                {field: 'order_begin_time', title: '预约开始时间',  sort: true},
-                {field: 'order_end_time', title: '预约结束时间', sort: true},
-                {field: 'event_begin_time', title: '讲座开始时间', sort: true},
-                {field: 'event_end_time', title: '讲座结束时间', sort: true}
-            ]],
-            data: [],
-            //skin: 'line', // 表格风格
-            //even: true,
-            page: true, // 是否显示分页
-            limits: [5, 10, 15],
-            limit: 5 // 每页默认显示的数量
-        });
-
-        window.addEventListener('pywebviewready', function () {
-            console.log(' pywebview is ready')
-            pywebview.api.get_lecture_list().then(function (result) {
-                console.log(result)
-                if (result['success']) {
-                    table.reload('lectures_table', {data: result['data']})
-                } else {
-                    alert(result['info'])
-                }
-            })
-        })
-
-    });
+    var queryString = window.location.search;
+    var urlParams = new URLSearchParams(queryString);
+    var wid = urlParams.get('wid');
+    document.getElementById("lectureId").innerText = wid;
 </script>
 </body>
 </html>

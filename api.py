@@ -135,7 +135,7 @@ class API:
         self.accounts = None
         self.student_id = None
         self.password = None
-        self.redirect_url=None
+        self.redirect_url = None
         self.load_account_list()
 
     def load_account_list(self):
@@ -200,7 +200,7 @@ class API:
         service_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"
         result = {'success': False, 'info': None}
         if direct_login:
-            login_result = seu_login(student_id, password,service_url=service_url)
+            login_result = seu_login(student_id, password, service_url=service_url)
             result['info'] = login_result['info']
             self.redirect_url = login_result['redirectUrl']
             if not login_result['success']:
@@ -219,7 +219,7 @@ class API:
             result['info'] = '账号不存在'
             return result
 
-        login_result = seu_login(student_id, password, service_url = service_url)
+        login_result = seu_login(student_id, password, service_url=service_url)
         self.redirect_url = login_result['redirectUrl']
         if not login_result['success']:
             # 有效性改为false
@@ -250,7 +250,7 @@ class API:
                 raise Exception('未获得重定向url')
 
             # 访问研究生素质讲座系统页面
-            res = self.session.get(self.redirect_url, verify=False)
+            res = self.session.get(self.redirect_url, verify=False,timeout=10)
             if res.status_code != 200:
                 raise Exception(
                     f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]"
@@ -274,6 +274,10 @@ class API:
                 result_data.append({
                     'wid': raw_lecture['WID'],
                     'lecture_name': raw_lecture['JZMC'],
+                    # 总人数
+                    'total_capacity': raw_lecture['HDZRS'],
+                    # 已报名人数
+                    'order_capacity': raw_lecture['YYRS'],
                     'order_begin_time': raw_lecture['YYKSSJ'],
                     'order_end_time': raw_lecture['YYJSSJ'],
                     'event_begin_time': raw_lecture['JZSJ'],
@@ -292,7 +296,7 @@ class API:
             result['info'] = str(e)
             return result
 
-    def fetch_lecture_loop(self, hd_wid: str):
+    def get_lecture_info(self):
         pass
 
     def fetch_lecture(self, hd_wid: str):
