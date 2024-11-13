@@ -250,7 +250,7 @@ class API:
                 raise Exception('未获得重定向url')
 
             # 访问研究生素质讲座系统页面
-            res = self.session.get(self.redirect_url, verify=False,timeout=10)
+            res = self.session.get(self.redirect_url, verify=False, timeout=10)
             if res.status_code != 200:
                 raise Exception(
                     f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]"
@@ -296,8 +296,48 @@ class API:
             result['info'] = str(e)
             return result
 
-    def get_lecture_info(self):
-        pass
+    def get_lecture_info(self, wid):
+        result = {
+            'success': False,
+            'info': None,
+            'data': None
+        }
+        try:
+            res = self.session.post("https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxq_cx.do?WID="+wid)
+            if res.status_code != 200:
+                result['info'] = f'POST请求失败[{res.status_code}, {res.reason}]'
+                raise Exception(f'POST请求失败[{res.status_code}, {res.reason}]')
+            raw_lecture = res.json()['datas']['hdxxxq_cx']['rows'][0]
+            result['data'] = {
+                'wid': raw_lecture['WID'],
+                'lecture_name': raw_lecture['JZMC'],
+                # 总人数
+                'total_capacity': raw_lecture['HDZRS'],
+                # 已报名人数
+                'order_capacity': raw_lecture['YYRS'],
+                'order_begin_time': raw_lecture['YYKSSJ'],
+                'order_end_time': raw_lecture['YYJSSJ'],
+                'event_begin_time': raw_lecture['JZSJ'],
+                'event_end_time': raw_lecture['HDJSSJ'],
+                # 地点
+                'location': raw_lecture['JZDD'],
+                # 嘉宾
+                'guest': raw_lecture['ZJR'],
+                # 类别
+                'type': raw_lecture['JZXL_DISPLAY'],
+                # 线上或线下
+                'online': raw_lecture['HDFS_DISPLAY'],
+                # 所在校区
+                'campus': raw_lecture['SZXQ_DISPLAY'],
+                # 承办方
+                'organizer': raw_lecture['ZBF'],
+            }
+            result['success'] = True
+            return result
+        except Exception as e:
+            print('获取讲座信息失败，错误信息：', e)
+            result['info'] = str(e)
+            return result
 
     def fetch_lecture(self, hd_wid: str):
         pass

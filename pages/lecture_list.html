@@ -70,6 +70,29 @@
                     title: '抢讲座 - ' + data.lecture_name,
                     area: ['90%', '90%'], // 宽高
                     content: `fetch.html?wid=${data.wid}`, // 这里替换成实际的讲座注册页面URL，带上参数
+                    success: function (layero, index, that) {
+                        // 更改iframe的内容
+                        pywebview.api.get_lecture_info(data.wid).then(function (result) {
+                            console.log(result)
+                            const iframe = layero.find('iframe');
+                            lecture_info = result.data
+                            var iframeDocument = iframe[0].contentDocument || iframe[0].contentWindow.document;
+                            iframeDocument.getElementById("online").innerText = lecture_info['online'];
+                            iframeDocument.getElementById("type").innerText = lecture_info['type'];
+                            iframeDocument.getElementById("order_num").innerText = lecture_info.order_capacity + ' / ' + lecture_info.total_capacity;
+                            iframeDocument.getElementById("campus").innerText = lecture_info.campus;
+                            iframeDocument.getElementById("location").innerText = lecture_info['location'];
+                            iframeDocument.getElementById("order_begin_time").innerText = lecture_info.order_begin_time;
+                            iframeDocument.getElementById("order_end_time").innerText = lecture_info.order_end_time;
+                            iframeDocument.getElementById("event_begin_time").innerText = lecture_info.event_begin_time;
+                            iframeDocument.getElementById("event_end_time").innerText = lecture_info.event_end_time;
+                            iframeDocument.getElementById("organizer").innerText = lecture_info.organizer;
+                            iframeDocument.getElementById("guest").innerText = lecture_info.guest;
+
+
+                        })
+
+                    }
                 });
             }
         });

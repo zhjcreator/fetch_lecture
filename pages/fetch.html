@@ -1,20 +1,110 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
-    <meta charset="UTF-8">
-    <title>Title</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>抢讲座</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/layui/2.9.14/css/layui.css" rel="stylesheet">
+    <style>
+        .parent {
+            display: flex;
+            line-height: 20px;
+
+        }
+
+        .left {
+            width: 35%
+        }
+
+        .left div {
+            text-align: right;
+        }
+    </style>
 </head>
 <body>
 <div>
-    <H1>
-        获取iframe页面传递的参数: <span id="lectureId"></span>
-    </H1>
+    <div class="layui-row">
+        <!--  讲座详情      -->
+        <div class="layui-col-xs6  layui-panel">
+
+            <div class='parent'>
+                <div class="left">
+                    <div>
+                        <span>活动方式：</span>
+                    </div>
+                    <div>
+                        <span>活动类型：</span>
+                    </div>
+                    <div>
+                        <span>预约人数：</span>
+                    </div>
+                    <div>
+                        <span>所在校区：</span>
+                    </div>
+                    <div>
+                        <span>活动地点：</span>
+                    </div>
+                    <div>
+                        <span>预约开始时间：</span>
+                    </div>
+                    <div>
+                        <span>预约结束时间：</span>
+                    </div>
+                    <div>
+                        <span>讲座开始时间：</span>
+                    </div>
+                    <div>
+                        <span>讲座结束时间：</span>
+                    </div>
+                    <div>
+                        <span>承办方：</span>
+                    </div>
+                    <div>
+                        <span>嘉宾：</span>
+                    </div>
+                </div>
+                <div class="right">
+                    <div>
+                        <span id="online">线下讲座</span>
+                    </div>
+                    <div>
+                        <span id="type">人文与科学素养系列讲座-艺术类</span>
+                    </div>
+                    <div>
+                        <span id="order_num">0 / 30</span>
+                    </div>
+                    <div>
+                        <span id="campus">九龙湖校区</span>
+                    </div>
+                    <div>
+                        <span id="location">九龙湖润良报告厅</span>
+                    </div>
+                    <div>
+                        <span id="order_begin_time">2023-04-01 14:00:00</span>
+                    </div>
+                    <div>
+                        <span id="order_end_time">2023-04-01 13:00:00</span>
+                    </div>
+                    <div>
+                        <span id="event_begin_time">2023-04-01 14:00:00</span>
+                    </div>
+                    <div>
+                        <span id="event_end_time">2023-04-01 15:00:00</span>
+                    </div>
+                    <div>
+                        <span id="organizer">东南大学研究生会</span>
+                    </div>
+                    <div>
+                        <span id="guest">詹丹</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="layui-col-xs6">
+            <div class="grid-demo">6/12</div>
+        </div>
+    </div>
 </div>
-<script>
-    var queryString = window.location.search;
-    var urlParams = new URLSearchParams(queryString);
-    var wid = urlParams.get('wid');
-    document.getElementById("lectureId").innerText = wid;
-</script>
+<script src="//unpkg.com/layui@2.9.14/dist/layui.js"></script>
 </body>
 </html>
