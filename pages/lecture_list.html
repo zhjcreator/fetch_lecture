@@ -89,7 +89,6 @@
                             iframeDocument.getElementById("organizer").innerText = lecture_info.organizer;
                             iframeDocument.getElementById("guest").innerText = lecture_info.guest;
 
-
                         })
 
                     }
@@ -109,6 +108,17 @@
         })
 
     });
+</script>
+<script>
+    function fetch_lecture(wid) {
+        // var layer = layui.layer;
+        let fetch_result=null
+        pywebview.api.fetch_lecture(wid).then(function (result) {
+            // layer.alert('调用抢课程序成功')
+            fetch_result= result
+        })
+        return fetch_result
+    }
 </script>
 </body>
 </html>

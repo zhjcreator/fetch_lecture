@@ -303,11 +303,12 @@ class API:
             'data': None
         }
         try:
-            res = self.session.post("https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxq_cx.do?WID="+wid)
+            res = self.session.post("https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxq_cx.do?WID=" + wid)
             if res.status_code != 200:
                 result['info'] = f'POST请求失败[{res.status_code}, {res.reason}]'
                 raise Exception(f'POST请求失败[{res.status_code}, {res.reason}]')
             raw_lecture = res.json()['datas']['hdxxxq_cx']['rows'][0]
+            print(raw_lecture)
             result['data'] = {
                 'wid': raw_lecture['WID'],
                 'lecture_name': raw_lecture['JZMC'],
@@ -339,5 +340,56 @@ class API:
             result['info'] = str(e)
             return result
 
-    def fetch_lecture(self, hd_wid: str):
-        pass
+    def fetch_lecture(self, wid: str):
+        result = {
+            'success': False,
+            'msg': None,
+            'code': None
+        }
+        # 重新登录保证session 有效
+        login_result = self.login(self.student_id, self.password)
+        if not login_result['success']:
+            result['msg'] = '维持登录状态失败:' + login_result['info']
+            return login_result
+        # 获取讲座当前已抢和未抢人数
+        lecture_info = self.get_lecture_info(wid)
+        print(lecture_info)
+        if not lecture_info['success']:
+            result['msg'] = '获取讲座信息失败:' + lecture_info['info']
+            return lecture_info
+        if lecture_info['data']['order_capacity'] >= lecture_info['data']['total_capacity']:
+            result['msg'] = '讲座已满，开始等待'
+            return result
+        # 获取验证码
+        v_code, c_img = get_code(ss=self.session)
+        result['code'] = v_code
+        # 抢讲座
+        url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
+        data_json = {"HD_WID": wid, "vcode": v_code}
+        form = {"paramJson": json.dumps(data_json)}
+        headers = {
+            "Host": "ehall.seu.edu.cn",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": "https://ehall.seu.edu.cn",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+            "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        }
+        self.session.headers.update(headers)
+        r = self.session.post(url, data=form)
+        fetch_result = r.json()
+
+        # 如果验证码正确，进行存储
+        if '验证码错误' not in fetch_result['msg']:
+            # 存储验证码为v_code.png
+            with open(f'{v_code}.png', 'wb') as f:
+                f.write(c_img)
+
+        result['msg'] = fetch_result['msg']
+        result['success'] = fetch_result['success']
+
+        return result

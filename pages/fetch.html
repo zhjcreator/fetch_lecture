@@ -25,10 +25,9 @@
 <div>
     <div class="layui-row">
         <!--  讲座详情      -->
-        <div class="layui-col-xs6  layui-panel">
-
-            <div class='parent'>
-                <div class="left">
+        <div class="layui-col-xs6" style="padding: 10px 10px">
+            <div class='parent   layui-panel'>
+                <div class="left" style="height: 53vh">
                     <div>
                         <span>活动方式：</span>
                     </div>
@@ -63,7 +62,7 @@
                         <span>嘉宾：</span>
                     </div>
                 </div>
-                <div class="right">
+                <div class="right" style="height: 30vh">
                     <div>
                         <span id="online">线下讲座</span>
                     </div>
@@ -99,12 +98,208 @@
                     </div>
                 </div>
             </div>
+            <hr class="ws-space-16">
+
+            <div class="layui-panel">
+                <form class="layui-form">
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">提前时间：</label>
+                        <div class="layui-input-block" style="padding-top: 15px; padding-right: 15px">
+                            <div id="advance_time"></div>
+                        </div>
+                    </div>
+                    <div class="layui-form-item">
+                        <label class="layui-form-label">抢课间隔：</label>
+                        <div class="layui-input-block" style="padding-top: 15px; padding-right: 15px">
+                            <div id="interval_time"></div>
+                        </div>
+                    </div>
+                    <div class="layui-form-item" style="width: 50%;margin-left: 25%">
+                        <button class="layui-btn layui-btn-fluid" id="fetch_button">开抢</button>
+                    </div>
+                </form>
+            </div>
         </div>
-        <div class="layui-col-xs6">
-            <div class="grid-demo">6/12</div>
+        <div class="layui-col-xs6" style="padding: 10px 10px">
+            <div class="layui-panel">
+                <div style="padding: 32px;height: 61vh;overflow-y: auto;" id="fetch_log_container">
+                    请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议提前时间设为2秒，抢课间隔设为0.5秒。
+                    如果想捡漏，建议增大抢课间隔。
+                </div>
+            </div>
+            <hr class="ws-space-16">
+
+            <div class="layui-panel">
+                <button disabled class="layui-btn layui-btn-fluid layui-bg-red" id="stop_button">
+                    停止抢课
+                </button>
+            </div>
         </div>
     </div>
 </div>
 <script src="//unpkg.com/layui@2.9.14/dist/layui.js"></script>
+<script>
+    var wid = new URL(location.href).searchParams.get('wid')
+    var advance_time = 2
+    var interval_time = 0.5
+    layui.use(function () {
+        var $ = layui.$;
+        var slider = layui.slider;
+        // 渲染
+        slider.render({
+            elem: '#advance_time',
+            step: 1, // 步长
+            value: 2,
+            min: 0,
+            max: 10,
+            showstep: true, // 开启间隔点
+            done: function (value) {
+                advance_time = value
+            },
+            change: function (value) {
+                advance_time = value
+            }
+        });
+        slider.render({
+            elem: '#interval_time',
+            step: 0.5, // 步长
+            value: 0.5,
+            min: 0,
+            max: 20,
+            showstep: false, // 开启间隔点
+            done: function (value) {
+                interval_time = value
+            },
+            change: function (value) {
+                interval_time = value
+            }
+        });
+    });
+</script>
+<script>
+    var shouldContinue = true;
+    var isRunning = false;
+    var fetch_button = document.getElementById('fetch_button');
+    var stop_button = document.getElementById('stop_button');
+    var intervalId = null
+    // console.log(fetch_button)
+    fetch_button.onclick = function () {
+        if (!isRunning) {
+            isRunning = true;
+            fetch_button.innerHTML = '<i class="layui-icon layui-icon-loading"></i>抢课中...'; // 更改按钮文本
+            // console.log(fetch_button.classList)
+            // fetch_button.classList.add('layui-btn-disabled');
+            fetch_button.disabled = true;
+            clear_log()
+            fetch_log('提前时间为' + advance_time + '秒，抢课间隔为' + interval_time + '秒')
+
+            const order_begin_time = new Date(document.getElementById('order_begin_time').innerText)
+            const order_end_time = new Date(document.getElementById('order_end_time').innerText)
+            fetch_log('当前时间为' + new Date().toLocaleString())
+            fetch_log('预约开始时间为' + order_begin_time.toLocaleString())
+            fetch_log('预约结束时间为' + order_end_time.toLocaleString())
+
+            if (order_end_time < new Date()) {
+                fetch_log('预约时间已过，停止抢课')
+                isRunning = false
+                fetch_button.innerHTML = '开抢';
+                stop_button.disabled = true;
+                fetch_button.disabled = false;
+                return
+            }
+
+            // 开始循环执行的程序
+            intervalId = setInterval(
+                loop_fetch_lecture,
+                1000 * interval_time,
+                wid, order_begin_time, order_end_time, advance_time
+            ); // 每interval_time秒执行一次
+
+            // 将停止按钮设置为可用
+            stop_button.disabled = false;
+        }
+    };
+
+    stop_button.onclick = function () {
+        shouldContinue = false;
+        fetch_log('已停止抢课')
+        // fetch_button.classList.remove('layui-btn-disabled');
+        fetch_button.disabled = false;
+        fetch_button.innerText = '开抢';
+        stop_button.disabled = true;
+
+        if (intervalId !== null) {
+            clearInterval(intervalId)
+            intervalId = null
+        }
+    };
+
+    function loop_fetch_lecture(wid, order_begin_time, order_end_time, advance_time) {
+        if (order_begin_time.getTime() > (new Date().getTime() + advance_time * 1000)) {
+            const wait_time = order_begin_time.getTime() - new Date().getTime() - advance_time * 1000
+            fetch_log('预约时间未到，等待' + wait_time / 1000 + '秒')
+            return
+        }
+        if (!shouldContinue) {
+            isRunning = false;
+            clearInterval(intervalId);
+            intervalId = null
+            return
+        }
+        const fetch_result = parent.fetch_lecture(wid)
+
+        // 成功抢到
+        if (fetch_result['success']) {
+            fetch_log('成功抢到')
+            isRunning = false;
+            clearInterval(intervalId);
+            intervalId = null
+            return
+        } else if (fetch_result['msg'].includes('验证码错误') || fetch_result['msg'].includes('人数已满')) {
+            fetch_log(fetch_result['msg'])
+            fetch_log('正在重试...')
+        } else if (fetch_result['msg'].includes('讲座已满')) {
+            fetch_log(fetch_result['msg'])
+        } else {
+            fetch_log(fetch_result['msg'])
+            isRunning = false;
+            clearInterval(intervalId);
+            intervalId = null
+            return;
+        }
+    }
+
+</script>
+
+<script>
+    var logContainer = document.getElementById('fetch_log_container');
+
+    // 模拟日志输出
+    function fetch_log(message) {
+        var logEntry = document.createElement('div');
+        logEntry.className = 'log-entry';
+        logEntry.textContent = message;
+        logContainer.appendChild(logEntry);
+
+        // 滚动到日志容器的底部
+        logContainer.scrollTop = logContainer.scrollHeight;
+        // 保留50条记录
+        limitLogEntries(50);
+    }
+
+    function clear_log() {
+        logContainer.innerHTML = '请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议提前时间设为2秒，抢课间隔设为0.5秒'
+    }
+
+    // 限制日志容器中的日志条目数量
+    function limitLogEntries(maxEntries) {
+        var entries = logContainer.getElementsByClassName('log-entry');
+        while (entries.length > maxEntries) {
+            logContainer.removeChild(entries[0]); // 移除第一条日志
+        }
+    }
+
+</script>
+
 </body>
 </html>
