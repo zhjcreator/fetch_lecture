@@ -1,13 +1,15 @@
 import base64
 import json
+import os
 import sys
 import time
 
 import ddddocr  # 要求 python <= 3.9
+from hashlib import md5
+from io import BytesIO
+from PIL import Image
 
 from seu_auth import seu_login
-
-ocr = ddddocr.DdddOcr()
 
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
@@ -36,15 +38,26 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
     return result["code"], result["msg"], result["success"]
 
 
-def get_code(ss):
+def get_code(ss, captcha_hash_table=None):
     c_url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_=" + str(
         int(time.time() * 1000)
     )
     c = ss.post(c_url)
     c_r = c.json()
     c_img = base64.b64decode(c_r["result"].split(",")[1])
-    c = ocr.classification(c_img)
-    return c, c_img
+    result = ""
+    if captcha_hash_table:
+        # 计算hash
+        img = Image.open(BytesIO(c_img))
+        img.save(f"tmp.jpg")
+        img = Image.open(f"tmp.jpg")
+        hash = md5(img.tobytes()).hexdigest()
+        os.remove(f"tmp.jpg")
+        if hash in captcha_hash_table:
+            result = captcha_hash_table[hash]
+    if not result:
+        result = ocr.classification(c_img)
+    return result, c_img
 
 
 # def multi_threads(ss, threads_id, hd_wid: str, ver_code):
@@ -168,6 +181,20 @@ if __name__ == "__main__":
             f.write("{}\n".format(user_name).encode())
             f.write("{}\n".format(password).encode())
 
+    ##### 初始化验证码识别 #####
+    ocr = ddddocr.DdddOcr(
+        import_onnx_path="./model.onnx",
+        charsets_path="./charsets.json",
+    )
+    captcha_hash_table = {}
+    with open("captcha_hash_table.csv", "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            hash_val, label = line.split(",")
+            captcha_hash_table[hash_val] = label
+
     ##### 登录 + 爬取课程列表 #####
     print(time.ctime(), "开始登录")
     s, lecture_list, stu_cnt_arr = get_lecture_list(user_name, password)
@@ -207,7 +234,7 @@ if __name__ == "__main__":
 
     ##### 抢 #####
     print(time.ctime(), "开始抢课")
-    v_code, _ = get_code(ss=s)
+    v_code, _ = get_code(ss=s, captcha_hash_table=captcha_hash_table)
     i = 1
     while True:
         try:
@@ -218,7 +245,7 @@ if __name__ == "__main__":
                 if success or "请求过于频繁" in msg:
                     break
                 if "验证码错误" in msg or "人数已满" in msg:
-                    v_code, _ = get_code(ss=s)
+                    v_code, _ = get_code(ss=s, captcha_hash_table=captcha_hash_table)
                 i += 1
             else:
                 print(
