@@ -18,11 +18,30 @@ License: GPL-3.0 License
 
 import base64
 import json
+import ssl
 from urllib.parse import unquote
 
 import requests
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.PublicKey import RSA
+
+from requests.adapters import HTTPAdapter
+
+class TLSAdapter(HTTPAdapter):
+    """
+    用于支持TLSv1.2的适配器。解决校园网内脚本ssl报错。
+
+    @author: zhjcreator
+    """
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        # 降低安全级别以允许旧协议重协商
+        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+        ctx.check_hostname=False
+        # 启用OP_LEGACY_SERVER_CONNECT（关键配置）
+        ctx.options |= 0x4  # 对应ssl.OP_LEGACY_SERVER_CONNECT
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
 
 
 def get_pub_key():
@@ -35,6 +54,8 @@ def get_pub_key():
     """
     try:
         session = requests.Session()
+        session.mount("https://", TLSAdapter())
+
         # Headers中的Content-Type、UA必填；
         # Host、Origin、Referer在后续访问其他服务时大多需要填，内容自己去抓包看；
         # 经测试，以下Headers中注释掉的字段均不影响身份认证的登录过程，但访问其他服务时需要自行抓包填写。

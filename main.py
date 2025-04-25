@@ -3,17 +3,31 @@ import json
 import os
 import sys
 import time
-
-import ddddocr  # 要求 python <= 3.9
 from hashlib import md5
 from io import BytesIO
-from PIL import Image
+import select
+import datetime
 
-from seu_auth import seu_login
+import ddddocr
+import requests
+from PIL import Image
+from rich.console import Console
+from rich.progress import Progress
+from rich.prompt import Prompt, Confirm
+from rich.table import Table
+from rich.panel import Panel
+
+from seu_auth import seu_login  # 确保该模块存在
+
+# 初始化 rich 组件
+console = Console()
+error_console = Console(stderr=True, style="bold red")
+
+# 是否保存验证码
+save_code = False
 
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
-    # FIXME：Issue #8 反馈的问题本地测试已解决，待其他人的测试与反馈
     url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
     data_json = {"HD_WID": hd_wid, "vcode": ver_code}
     form = {"paramJson": json.dumps(data_json)}
@@ -29,62 +43,43 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         "Accept-Encoding": "gzip, deflate, br",
         "Accept-Language": "zh-CN,zh-Hans;q=0.9",
     }
-    ss.headers.update(headers)  # 更新Content-Type [Issue #8]
+    ss.headers.update(headers)
     r = ss.post(url, data=form)
+    # 如果返回的是网页，说明返回值错误
+    if r.headers.get("Content-Type", "").startswith("text/html"):
+        return 500,'请求错误，返回值为网页', False
+
     result = r.json()
-    if result["success"] is not False:
-        print(result)
+
+    if result.get("success", False):
+        console.print(Panel.fit(f"[bold green]抢课成功！[/]\n{json.dumps(result, indent=2)}", title="成功"))
         sys.exit(0)
     return result["code"], result["msg"], result["success"]
 
 
 def get_code(ss, captcha_hash_table=None):
-    c_url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_=" + str(
-        int(time.time() * 1000)
-    )
+    c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
     c = ss.post(c_url)
     c_r = c.json()
     c_img = base64.b64decode(c_r["result"].split(",")[1])
     result = ""
+
     if captcha_hash_table:
-        # 计算hash
         img = Image.open(BytesIO(c_img))
-        img.save(f"tmp.jpg")
-        img = Image.open(f"tmp.jpg")
-        hash = md5(img.tobytes()).hexdigest()
-        os.remove(f"tmp.jpg")
-        if hash in captcha_hash_table:
-            result = captcha_hash_table[hash]
+        with BytesIO() as output:
+            img.save(output, format="JPEG")
+            hash_val = md5(output.getvalue()).hexdigest()
+        if hash_val in captcha_hash_table:
+            result = captcha_hash_table[hash_val]
+
     if not result:
         result = ocr.classification(c_img)
+
     return result, c_img
 
 
-# def multi_threads(ss, threads_id, hd_wid: str, ver_code):
-#     i = 1
-#     while True:
-#         code, msg, success = fetch_lecture(hd_wid, ss, ver_code)
-#         print('线程{},第{}次请求,code：{},msg：{},success:{}'.format(threads_id, i, code, msg, success))
-#         if success is True or msg == '当前活动预约人数已满，请重新选择！' or msg == '已经预约过该活动，无需重新预约！':
-#             sys.exit(0)
-#         i += 1
-#         time.sleep(0.3)
-
-
-def get_lecture_list(username: str, password: str):
-    """登录到研究生素质讲座系统，用于后续在此系统中进行其他操作。
-
-    Args:
-        username: 一卡通号
-        password: 统一身份认证密码
-
-    Returns:
-        session: 登录到研究生素质讲座系统后的session
-        lecture_list: 查询到的研究生素质讲座列表
-        stu_cnt_arr: 二维数组，每个元素为[讲座总人数, 已预约人数]
-    """
+def login(username: str, password: str):
     try:
-        # 登录统一身份认证平台
         service_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"
         session, redirect_url = seu_login(username, password, service_url)
         if not session:
@@ -92,170 +87,208 @@ def get_lecture_list(username: str, password: str):
         if not redirect_url:
             raise Exception("获取重定向url失败")
 
-        # 访问研究生素质讲座系统页面
         res = session.get(redirect_url, verify=False)
         if res.status_code != 200:
-            raise Exception(
-                f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]"
-            )
-        # 获取所有讲座信息
-        # res = session.post(
-        #     'http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/modules/hdyy/hdxxxs.do',
-        #     data={'pageSize': 100, 'pageNumber': 1},
-        # )
-        res = session.post(
-            "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_="
-            + str(int(time.time() * 1000)),
-            data={
-                "pageIndex": 1,
-                "pageSize": 100,
-                "sortField": None,
-                "sortOrder": None,
-            },
-        )
-        if res.status_code != 200:
-            raise Exception(f"POST请求失败[{res.status_code}, {res.reason}]")
-        lecture_list = res.json()["datas"]
-        stu_cnt_arr = [[0, 0] for _ in range(len(lecture_list))]
-        for i, lecture in enumerate(lecture_list):
-            stu_cnt_arr[i][0] = int(lecture["HDZRS"])
-            stu_cnt_arr[i][1] = int(lecture["YYRS"])
-        print("获取讲座列表成功")
+            raise Exception(f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]")
+        return session
+    except Exception as e:
+        error_console.print(Panel.fit(f"[bold red]✗ 登录失败: {str(e)}[/]", title="错误"))
+        return None
 
+
+def get_lecture_list(session):
+    try:
+        res = session.post(
+            f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
+            data={"pageIndex": 1, "pageSize": 100}
+        )
+        lecture_list = res.json()["datas"]
+        stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
+
+        console.print("[bold green]✓ 获取讲座列表成功[/]")
         return session, lecture_list, stu_cnt_arr
     except Exception as e:
-        print("获取讲座列表失败，错误信息：", e)
+        error_console.print(f"[bold red]✗ 获取讲座列表失败: {str(e)}[/]")
         return None, None, None
 
 
-def print_lecture_list(lecture_list: list):
-    """打印讲座列表
+def login_and_get_lecture_list(username: str, password: str):
+    session = login(username, password)
+    if session is None:
+        return None, None, None
 
-    Args:
-        lecture_list: get_lecture_list()返回的讲座列表
-    """
+    return get_lecture_list(session)
+
+
+def print_lecture_list(lecture_list: list):
     try:
-        print("\n----------------课程列表----------------")
-        for index, lecture in enumerate(lecture_list):
-            print("序号：", end="")
-            print(index, end=" ")
-            print("课程wid：", end=" ")
-            print(lecture["WID"], end="  |  ")
-            print("课程名称：", end=" ")
-            print(lecture["JZMC"], end="  |  ")
-            print("预约开始时间：", end=" ")
-            print(lecture["YYKSSJ"], end="  |  ")
-            print("预约结束时间：", end=" ")
-            print(lecture["YYJSSJ"], end="  |  ")
-            print("活动时间：")
-            print(lecture["JZSJ"])
-        print("----------------课程列表end----------------\n")
+        table = Table(title="研究生素质讲座列表", show_header=True, header_style="bold magenta")
+        table.add_column("序号", style="cyan")
+        # table.add_column("WID", style="blue", width=20)
+        table.add_column("讲座名称")
+        table.add_column("预约时间")
+        table.add_column("活动时间")
+
+        for idx, lecture in enumerate(lecture_list):
+            table.add_row(
+                str(idx),
+                # lecture["WID"],
+                lecture["JZMC"],
+                f"{lecture['YYKSSJ']}至{lecture['YYJSSJ']}",
+                lecture["JZSJ"]
+            )
+        console.print(table)
     except Exception as e:
-        print("打印讲座列表失败，错误信息：", e)
+        error_console.print(f"打印讲座列表失败: {str(e)}")
+
+# 从服务器返回数据head中date字段获取当前时间，替代datetime.datetime.now()
+def get_current_time_from_server(session):
+    try:
+        res = session.post(
+            f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
+            data={"pageIndex": 1, "pageSize": 100}
+        )
+        date_str = res.headers['Date']
+        console.print(f"[bold green]✓ 获取服务器时间成功: {date_str}[/]")
+        date_format = "%a, %d %b %Y %H:%M:%S %Z"
+        server_time = datetime.datetime.strptime(date_str, date_format)
+        # 时间加一秒，实现提前抢课
+        server_time = server_time + datetime.timedelta(seconds=1)
+        return server_time
+    except Exception as e:
+        error_console.print(f"[bold red]✗ 获取服务器时间失败: {str(e)}[/]，使用当前时间代替")
+        return datetime.datetime.now() + datetime.timedelta(seconds=1)
 
 
 if __name__ == "__main__":
-    ##### 读取/创建用户账号配置文件 #####
-    user_name = None
-    password = None
-    stu_info = None
-    try:
-        with open("config.txt", "r") as f:
-            stu_info = [line.strip() for line in f]
-    except Exception:
-        print(
-            "将在本程序同级目录下创建config.txt文件，请按要求填写学号、密码，即可自动登录"
-        )
-
-    if stu_info and len(stu_info):
-        try:
-            user_name = stu_info[0]
-            password = stu_info[1]
-        except Exception:
-            print("请在config.txt配置正确的账号密码，即可自动登录")
-
-    if not user_name and not password:
-        user_name = input("请输入学号：").strip()
-        password = input("请输入密码：").strip()
-        with open("config.txt", "wb") as f:
-            f.write("{}\n".format(user_name).encode())
-            f.write("{}\n".format(password).encode())
-
-    ##### 初始化验证码识别 #####
-    ocr = ddddocr.DdddOcr(
-        import_onnx_path="./model.onnx",
-        charsets_path="./charsets.json",
-    )
+    # 初始化验证码组件
+    ocr = ddddocr.DdddOcr(import_onnx_path="./model.onnx", charsets_path="./charsets.json")
     captcha_hash_table = {}
-    with open("captcha_hash_table.csv", "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            hash_val, label = line.split(",")
-            captcha_hash_table[hash_val] = label
+    if os.path.exists("captcha_hash_table.csv"):
+        with open("captcha_hash_table.csv") as f:
+            for line in f:
+                if line.strip():
+                    hash_val, label = line.strip().split(",")
+                    captcha_hash_table[hash_val] = label
 
-    ##### 登录 + 爬取课程列表 #####
-    print(time.ctime(), "开始登录")
-    s, lecture_list, stu_cnt_arr = get_lecture_list(user_name, password)
+    # 用户认证
+    with console.status("[bold green]正在读取配置文件...") as status:
+        try:
+            with open("config.txt") as f:
+                stu_info = [line.strip() for line in f if line.strip()]
+                user_name, password = stu_info[0], stu_info[1]
+        except Exception:
+            status.stop()  # 关键：停止状态动画
+            console.print(Panel.fit("[yellow]⚠ 将在当前目录创建 config.txt 文件[/]", title="提示"))
+            user_name = Prompt.ask("请输入学号", console=console)
+            password = Prompt.ask("请输入密码", password=True, console=console)
+            with open("config.txt", "w") as f:
+                f.write(f"{user_name}\n{password}\n")
+
+    # 获取讲座列表
+    console.print(Panel.fit(f"[bold]🕒 {time.ctime()} 开始登录系统...[/]", title="状态"))
+    s, lecture_list, stu_cnt_arr = login_and_get_lecture_list(user_name, password)
     print_lecture_list(lecture_list)
 
-    ##### 选择课程 #####
-    lecture_info = False
-    while True:
-        target_index = int(input("请输入课程序号：").strip())
-        lecture_info = lecture_list[target_index]
-        wid = lecture_info["WID"]
-        confirm = input(f"确认讲座名称 {lecture_info['JZMC']} (y/n)：").strip()
-        if confirm == "y" or confirm == "Y":
-            break
-    advance_time = int(
-        input(
-            "请输入提前几秒开始抢（请保证本地时间准确，抢课频率受到限制，连续抢10次左右，建议2秒）："
-        ).strip()
-    )
-    current_time = int(time.time())
-    begin_time = int(
-        time.mktime(time.strptime(lecture_info["YYKSSJ"], "%Y-%m-%d %H:%M:%S"))
-    )
-    end_time = int(
-        time.mktime(time.strptime(lecture_info["YYJSSJ"], "%Y-%m-%d %H:%M:%S"))
-    )
-    if current_time > end_time:
-        print("抢课时间已结束，大侠请重新来过")
+    # 选择讲座
+    target_index = Prompt.ask("请输入课程序号", console=console, default="0")
+    lecture_info = lecture_list[int(target_index)]
+    wid = lecture_info["WID"]
+
+    if not Confirm.ask(f"确认选择讲座 [cyan]{lecture_info['JZMC']}[/]", default=True, console=console):
         sys.exit(0)
-    while current_time < begin_time - advance_time:
-        current_time = int(time.time())
-        print("等待{}秒".format(begin_time - advance_time - current_time))
-        if begin_time - advance_time - current_time < 5:
-            time.sleep(0.51)
-        else:
-            time.sleep(1)
 
-    ##### 抢 #####
-    print(time.ctime(), "开始抢课")
-    v_code, _ = get_code(ss=s, captcha_hash_table=captcha_hash_table)
-    i = 1
+    # 等待抢课
+    # advance_time = int(Prompt.ask("请输入提前秒数", console=console, default="2"))
+
+    # 从lecture_info["YYKSSJ"]获取目标时间，格式为"%Y-%m-%d %H:%M:%S"
+    # target_time = datetime.datetime.strptime(lecture_info["YYKSSJ"], "%Y-%m-%d %H:%M:%S") - datetime.timedelta(
+        # seconds=advance_time)
+    # start_time = datetime.datetime.now()
+    start_time = get_current_time_from_server(s)
+    target_time = datetime.datetime.strptime(lecture_info["YYKSSJ"], "%Y-%m-%d %H:%M:%S")
+    with Progress() as progress:
+        task = progress.add_task(
+            f"[red]等待抢课 | 目标时间: {target_time.strftime('%H:%M:%S')}",
+            total = target_time.timestamp() - start_time.timestamp()
+        )
+
+        while not progress.finished:
+            current_time = datetime.datetime.now()
+            remaining = (target_time - current_time).total_seconds()
+
+            if remaining < 0:
+                progress.update(task, completed = target_time.timestamp() - start_time.timestamp())
+                break
+
+            progress.update(
+                task,
+                advance = 1,
+                description = f"[bold cyan]等待抢课，剩余时间: {str(datetime.timedelta(seconds=int(remaining)))}[/] | 目标时间: {target_time.strftime('%H:%M:%S')}"
+            )
+            # 动态校准延时（精确到毫秒级）
+            time_to_sleep = min(1.0, max(0, remaining % 1))
+            time.sleep(time_to_sleep)
+
+    # 开始抢课
+    console.rule("[bold red]🚀 开始抢课！[/]")
+    # 先重新获取一次 session
+    s = login(user_name, password)
+    v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
+    attempt = 1
     while True:
+        # 不管是否抢，发送一次请求保活
+        s, _, stu_cnt_arr = get_lecture_list(s)
         try:
-            s, _, stu_cnt_arr = get_lecture_list(user_name, password)
-            if stu_cnt_arr[target_index][0] > stu_cnt_arr[target_index][1]:
-                code, msg, success = fetch_lecture(wid, s, v_code)
-                print(f"第{i}次请求，code：{code}，msg：{msg}，success: {success}")
-                if success or "请求过于频繁" in msg:
-                    break
-                if "验证码错误" in msg or "人数已满" in msg:
-                    v_code, _ = get_code(ss=s, captcha_hash_table=captcha_hash_table)
-                i += 1
-            else:
-                print(
-                    "当前人数已满，进入等待状态！已等待时间: {}s".format(
-                        int(time.time()) - current_time
-                    )
-                )
-                continue
+            with console.status(
+                    f"[bold][yellow]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/yellow] - 第 {attempt} 次尝试..."
+            ):
 
-        except Exception:
-            continue
-        finally:
-            time.sleep(0.5)
+                if stu_cnt_arr[int(target_index)][0] <= stu_cnt_arr[int(target_index)][1]:
+                    console.print("[yellow]当前人数已满，等待下次尝试...[/]")
+                    attempt += 1
+                    time.sleep(1)
+                    continue
+
+                code, msg, success = fetch_lecture(wid, s, v_code)
+                style = "green" if success else "red" if "频繁" in msg else "yellow"
+                console.print(f"[{style}]» 状态码: {code}\n   消息: {msg}\n   成功: {success}[/]")
+
+                if "验证码错误" in msg:
+
+                    # 保存验证码
+                    if save_code:
+                        with open(f"code_img/false/captcha_{attempt}_code{v_code}.jpg", "wb") as f:
+                            f.write(v_img)
+
+                    v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
+                    continue
+                else:
+                    # 保存验证码
+                    if save_code:
+                        with open(f"code_img/ture/captcha_{attempt}_code{v_code}.jpg", "wb") as f:
+                            f.write(v_img)
+
+                if success:
+                    break
+
+                if "频繁" in msg:
+                    console.print("[yellow]请求过于频繁，等待 10 秒后重试...[/]")
+                    time.sleep(10)
+
+                attempt += 1
+                time.sleep(0.5)
+        except Exception as e:
+            error_console.print(f"[bold red]‼ 发生异常: {str(e)}[/]")
+            time.sleep(1)
+        # finally:
+        #     time.sleep(0.5)
+
+    # 退出处理
+    console.print(Panel.fit("[bold]按任意键退出...[/]", title="完成"))
+    while True:
+        if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+            sys.stdin.read(1)
+            console.print("[italic]退出程序[/]")
+            sys.exit(0)
+        time.sleep(0.1)
