@@ -26,6 +26,13 @@ error_console = Console(stderr=True, style="bold red")
 # 是否保存验证码
 save_code = False
 
+def resource_path(relative_path):
+    if getattr(sys, 'frozen', False):  # 判断是否处于打包环境
+        base_path = sys._MEIPASS  # 临时解压路径
+    else:
+        base_path = os.path.abspath(".")
+    return str(os.path.join(base_path, relative_path))
+
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
     url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
@@ -162,10 +169,13 @@ def get_current_time_from_server(session):
 
 if __name__ == "__main__":
     # 初始化验证码组件
-    ocr = ddddocr.DdddOcr(import_onnx_path="./model.onnx", charsets_path="./charsets.json")
+    onnx_path = resource_path("model.onnx")
+    charsets_path = resource_path("charsets.json")
+    captcha_hash_table_path = resource_path("captcha_hash_table.csv")
+    ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path)
     captcha_hash_table = {}
-    if os.path.exists("captcha_hash_table.csv"):
-        with open("captcha_hash_table.csv") as f:
+    if os.path.exists(captcha_hash_table_path):
+        with open(captcha_hash_table_path) as f:
             for line in f:
                 if line.strip():
                     hash_val, label = line.strip().split(",")
