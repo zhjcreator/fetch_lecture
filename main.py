@@ -157,8 +157,10 @@ def get_current_time_from_server(session):
         )
         date_str = res.headers['Date']
         console.print(f"[bold green]✓ 获取服务器时间成功: {date_str}[/]")
+
         date_format = "%a, %d %b %Y %H:%M:%S %Z"
         server_time = datetime.datetime.strptime(date_str, date_format)
+        server_time = server_time.replace(tzinfo=datetime.timezone.utc)
         # 时间加一秒，实现提前抢课
         server_time = server_time + datetime.timedelta(seconds=1)
         return server_time
