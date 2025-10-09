@@ -2,25 +2,78 @@
 
 位置：信息门户——>学术交流与文体活动
 
-依赖：网络请求 - requests，验证码识别 - ddddocr，加解密 - pycryptodome
+项目主要依赖：
+- 网络请求：requests
+- 验证码识别：ddddocr
+- 图像处理：Pillow
+- 加密解密：pycryptodome
+- 终端美化：rich
+
+项目使用uv作为虚拟环境和包管理工具，配置了清华镜像源以加速依赖安装。
 
 感谢：[@Golevka2001](https://github.com/Golevka2001) [@surgery7630](https://github.com/surgery7630) [@DgntYang](https://github.com/DgntYang) [@GeeeekExplorer](https://github.com/GeeeekExplorer)
 
-## 安装依赖
+## 安装依赖与虚拟环境配置
 
-**要求 Python <= 3.9**
+### 环境要求
+**Python >= 3.11**（项目pyproject.toml中指定的最低版本）
 
-```shell
-# 虚拟环境【可选】
-python -m venv lecture_venv
-source lecture_venv/bin/activate
-# 安装依赖
-pip install -r requirements.txt
+### 使用uv管理环境与依赖
+本项目使用uv作为包管理工具，它比传统的pip更快、更高效。
+
+#### 安装uv（如果尚未安装）
+```bash
+python -m pip install uv
 ```
 
-ddddocr 库体积较大且 pypi.org 访问速度较慢，建议使用镜像源，如：`-i https://pypi.tuna.tsinghua.edu.cn/simple`
+#### 初始化虚拟环境
+```bash
+uv venv
+```
+
+#### 激活虚拟环境
+- Windows:
+```bash
+.venv\Scripts\activate
+```
+- macOS/Linux:
+```bash
+source .venv/bin/activate
+```
+
+#### 安装项目依赖
+项目已配置清华镜像源（在pyproject.toml中），可以加速安装过程：
+```bash
+uv pip install -e .
+# 或者直接从pyproject.toml安装
+uv pip install .
+```
+
+### 依赖说明
+本项目依赖的主要包及其用途：
+- **ddddocr (>=1.5.6)**：验证码识别库，用于自动识别讲座预约系统的验证码
+- **pillow (>=11.3.0)**：图像处理库，用于处理验证码图片
+- **pycryptodome (>=3.23.0)**：加密解密库，用于处理登录认证过程中的密码加密
+- **requests (>=2.32.5)**：HTTP请求库，用于与讲座预约系统进行通信
+- **rich (>=14.1.0)**：终端美化库，提供彩色输出、进度条等功能，提升用户体验
+
+### 手动安装依赖（可选）
+如果需要手动安装依赖，可以使用以下命令：
+```bash
+pip install ddddocr>=1.5.6 pillow>=11.3.0 pycryptodome>=3.23.0 requests>=2.32.5 rich>=14.1.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
 
 ## 更新日志
+
+### 2025/10/09 更新
+
+1. **多因素认证支持**: 实现手机验证码功能，支持非可信设备登录验证
+   - 新增 `get_mobile_verify_code()` 函数，用于发送手机验证码
+   - 优化登录流程，当检测到非可信设备时自动引导用户输入手机验证码
+
+2. **配置优化**: 在配置文件中增加指纹存储，下次启动时自动使用已保存的指纹
+
+3. **项目结构优化**: 更新了项目依赖管理，使用uv作为虚拟环境和包管理工具
 
 ### 2025/04/16 更新
 
