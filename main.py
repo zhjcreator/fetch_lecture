@@ -1,8 +1,8 @@
-import base64
 import json
 import os
 import sys
 import time
+import base64
 from hashlib import md5
 from io import BytesIO
 import select
@@ -28,10 +28,18 @@ save_code = False
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):  # 判断是否处于打包环境
-        base_path = sys._MEIPASS  # 临时解压路径
+        base_path = getattr(sys, '_MEIPASS', '')  # 临时解压路径
     else:
         base_path = os.path.abspath(".")
     return str(os.path.join(base_path, relative_path))
+
+
+# 生成浏览器指纹
+def generate_fingerprint():
+    # 仿照984ba064c2399f4b5c379df8aaeb995a生成，同样字符数，随机生成
+    fingerprint = md5(str(time.time()).encode()).hexdigest()
+    return fingerprint
+
 
 
 def fetch_lecture(hd_wid: str, ss, ver_code):
@@ -84,11 +92,25 @@ def get_code(ss, captcha_hash_table=None):
 
     return result, c_img
 
+def get_mobile_verify_code(ss, username: str):
+    url = "https://auth.seu.edu.cn/auth/casback/sendStage2Code"
+    data = {"userId": username}
+    res = ss.post(url, data=json.dumps(data))
+    if res.json()["success"] != True:
+        raise Exception(f"发送手机验证码失败[{res.status_code}, {res.json()}]")
+    else:
+        console.print(Panel.fit(f"[bold yellow]⚠ {res.json()['info']}[/]", title="提示"))
 
 def login(username: str, password: str):
     try:
         service_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"
-        session, redirect_url = seu_login(username, password, service_url)
+        session, redirect_url, error_type = seu_login(username, password, service_url,fingerprint)
+        
+        if error_type == 'non_trusted_device':
+            console.print(Panel.fit(f"[bold yellow]⚠ 非可信设备登录，需要输入手机验证码[/]", title="提示"))
+            get_mobile_verify_code(session,user_name)
+            phone_code = Prompt.ask("请输入手机验证码")
+            session, redirect_url, error_type = seu_login(username, password, service_url,fingerprint,phone_code)
         if not session:
             raise Exception("统一身份认证平台登录失败")
         if not redirect_url:
@@ -188,23 +210,31 @@ if __name__ == "__main__":
         try:
             with open("config.txt") as f:
                 stu_info = [line.strip() for line in f if line.strip()]
-                user_name, password = stu_info[0], stu_info[1]
+                user_name, password, fingerprint = stu_info[0], stu_info[1], stu_info[2]
         except Exception:
             status.stop()  # 关键：停止状态动画
             console.print(Panel.fit("[yellow]⚠ 将在当前目录创建 config.txt 文件[/]", title="提示"))
             user_name = Prompt.ask("请输入学号", console=console)
             password = Prompt.ask("请输入密码", password=True, console=console)
+            fingerprint = generate_fingerprint()
             with open("config.txt", "w") as f:
-                f.write(f"{user_name}\n{password}\n")
+                f.write(f"{user_name}\n{password}\n{fingerprint}\n")
 
     # 获取讲座列表
     console.print(Panel.fit(f"[bold]🕒 {time.ctime()} 开始登录系统...[/]", title="状态"))
     s, lecture_list, stu_cnt_arr = login_and_get_lecture_list(user_name, password)
-    print_lecture_list(lecture_list)
+    if lecture_list is not None:
+        print_lecture_list(lecture_list)
+    else:
+        error_console.print("[bold red]✗ 讲座列表为空，无法打印[/]")
 
     # 选择讲座
     target_index = Prompt.ask("请输入课程序号", console=console, default="0")
-    lecture_info = lecture_list[int(target_index)]
+    try:
+        lecture_info = lecture_list[int(target_index)]  # pyright: ignore[reportOptionalSubscript]
+    except (ValueError, IndexError, TypeError):
+        error_console.print("[bold red]✗ 输入的课程序号无效，请输入有效的序号[/]")
+        sys.exit(1)
     wid = lecture_info["WID"]
 
     if not Confirm.ask(f"确认选择讲座 [cyan]{lecture_info['JZMC']}[/]", default=True, console=console):
@@ -256,7 +286,7 @@ if __name__ == "__main__":
                     f"[bold][yellow]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/yellow] - 第 {attempt} 次尝试..."
             ):
 
-                if stu_cnt_arr[int(target_index)][0] <= stu_cnt_arr[int(target_index)][1]:
+                if stu_cnt_arr[int(target_index)][0] <= stu_cnt_arr[int(target_index)][1]:  # pyright: ignore[reportOptionalSubscript]
                     console.print("[yellow]当前人数已满，等待下次尝试...[/]")
                     attempt += 1
                     time.sleep(1)

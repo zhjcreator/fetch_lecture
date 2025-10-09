@@ -76,7 +76,7 @@ def get_pub_key():
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
             'Chrome/115.0.0.0 Safari/537.36'
         }
-        session.headers = headers
+        session.headers.update(headers)
         url = 'https://auth.seu.edu.cn/auth/casback/getChiperKey'
         res = session.post(url=url, data=json.dumps({}))
 
@@ -117,7 +117,7 @@ def rsa_encrypt(message, pub_key):
         return None
 
 
-def seu_login(username, password, service_url=''):
+def seu_login(username, password, service_url='', fingerprint=None, mobile_verify_code=None):
     """向统一身份认证平台发起登录请求。
 
     Args:
@@ -132,12 +132,12 @@ def seu_login(username, password, service_url=''):
     # 获取RSA公钥
     session, pub_key = get_pub_key()
     if not session:
-        return None, None
+        return None, None, None
 
     # 使用服务器返回的RSA公钥加密用户密码
     encrypted_password = rsa_encrypt(password, pub_key)
     if not encrypted_password:
-        return None, None
+        return None, None, None
 
     # 发起登录请求
     try:
@@ -153,6 +153,10 @@ def seu_login(username, password, service_url=''):
             'username': username,
             'wxBinded': False,
         }
+        if fingerprint:
+            data['fingerPrint'] = fingerprint
+        if mobile_verify_code:
+            data['mobileVerifyCode'] = rsa_encrypt(mobile_verify_code, pub_key)
         res = session.post(url=url, data=json.dumps(data))
 
         if res.status_code != 200:
@@ -164,12 +168,14 @@ def seu_login(username, password, service_url=''):
 
         # 未指定服务，无需重定向，直接返回session
         if res.json()['redirectUrl'] is None:
-            return session, None
+            return session, None, None
 
         # 指定服务，返回重定向url（含ticket）
         redirect_url = unquote(res.json()['redirectUrl'])
 
-        return session, redirect_url
+        return session, redirect_url, None
     except Exception as e:
         print('Failed to authenticate, info:', e)
-        return None, None
+        if '非可信设备' in str(e):
+            return session, None, 'non_trusted_device'
+        return None, None, None

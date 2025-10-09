@@ -1,0 +1,29 @@
+[project]
+name = "fetch_lecture"
+version = "0.1.0"
+description = "A tool to fetch lecture materials from the course platform."
+authors = [
+    { name = "zhjcreator"},
+]
+keywords = ["lecture", "fetch", "course"]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "ddddocr>=1.5.6",
+    "pillow>=11.3.0",
+    "pycryptodome>=3.23.0",
+    "requests>=2.32.5",
+    "rich>=14.1.0",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# python-install-mirror = "https://registry.npmmirror.com/-/binary/python-build-standalone/"
+python-install-mirror = "https://python-standalone.org/mirror/astral-sh/python-build-standalone/"
