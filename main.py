@@ -196,7 +196,7 @@ if __name__ == "__main__":
     onnx_path = resource_path("model.onnx")
     charsets_path = resource_path("charsets.json")
     captcha_hash_table_path = resource_path("captcha_hash_table.csv")
-    ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path)
+    ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path, show_ad=False)
     captcha_hash_table = {}
     if os.path.exists(captcha_hash_table_path):
         with open(captcha_hash_table_path) as f:
