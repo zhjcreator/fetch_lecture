@@ -101,16 +101,16 @@ def get_mobile_verify_code(ss, username: str):
     else:
         console.print(Panel.fit(f"[bold yellow]⚠ {res.json()['info']}[/]", title="提示"))
 
-def login(username: str, password: str):
+def login(username: str, password: str, fingerprint=None):
     try:
         service_url = "http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"
-        session, redirect_url, error_type = seu_login(username, password, service_url,fingerprint)
+        session, redirect_url, error_type = seu_login(username, password, service_url, fingerprint)
         
         if error_type == 'non_trusted_device':
             console.print(Panel.fit(f"[bold yellow]⚠ 非可信设备登录，需要输入手机验证码[/]", title="提示"))
-            get_mobile_verify_code(session,user_name)
+            get_mobile_verify_code(session, username)
             phone_code = Prompt.ask("请输入手机验证码")
-            session, redirect_url, error_type = seu_login(username, password, service_url,fingerprint,phone_code)
+            session, redirect_url, error_type = seu_login(username, password, service_url, fingerprint, phone_code)
         if not session:
             raise Exception("统一身份认证平台登录失败")
         if not redirect_url:
@@ -129,7 +129,8 @@ def get_lecture_list(session):
     try:
         res = session.post(
             f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
-            data={"pageIndex": 1, "pageSize": 100}
+            data={"pageIndex": 1, "pageSize": 100},
+            verify=False  # 禁用SSL证书验证
         )
         lecture_list = res.json()["datas"]
         stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
@@ -141,8 +142,8 @@ def get_lecture_list(session):
         return None, None, None
 
 
-def login_and_get_lecture_list(username: str, password: str):
-    session = login(username, password)
+def login_and_get_lecture_list(username: str, password: str, fingerprint=None):
+    session = login(username, password, fingerprint)
     if session is None:
         return None, None, None
 
@@ -222,7 +223,7 @@ if __name__ == "__main__":
 
     # 获取讲座列表
     console.print(Panel.fit(f"[bold]🕒 {time.ctime()} 开始登录系统...[/]", title="状态"))
-    s, lecture_list, stu_cnt_arr = login_and_get_lecture_list(user_name, password)
+    s, lecture_list, stu_cnt_arr = login_and_get_lecture_list(user_name, password, fingerprint)
     if lecture_list is not None:
         print_lecture_list(lecture_list)
     else:

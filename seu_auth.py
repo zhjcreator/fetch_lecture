@@ -38,6 +38,8 @@ class TLSAdapter(HTTPAdapter):
         # 降低安全级别以允许旧协议重协商
         ctx.set_ciphers("DEFAULT@SECLEVEL=1")
         ctx.check_hostname=False
+        # 禁用证书验证（解决证书验证失败问题）
+        ctx.verify_mode = ssl.CERT_NONE
         # 启用OP_LEGACY_SERVER_CONNECT（关键配置）
         ctx.options |= 0x4  # 对应ssl.OP_LEGACY_SERVER_CONNECT
         kwargs["ssl_context"] = ctx
