@@ -279,7 +279,32 @@ if __name__ == "__main__":
             if remaining < 0:
                 progress.update(task, completed = target_time.timestamp() - start_time.timestamp())
                 break
-
+            
+            # 【新增保活逻辑】
+            # 当剩余时间大于 5 秒时，每 5 秒进行一次保活请求
+            # 既能保持会话活跃，也能同步刷新讲座剩余人数
+            if int(remaining) % 5 == 0 and remaining > 5:
+                # 尝试保活并获取最新讲座列表
+                s_updated, _, stu_cnt_arr_updated = get_lecture_list(s)
+                if s_updated is None:
+                    # 保活失败（会话可能过期），尝试重新登录
+                    error_console.print("[bold red]会话保活失败，尝试重新登录...[/]")
+                    s = login(user_name, password, fingerprint)
+                    if s is None:
+                        # 如果重新登录仍然失败，则退出
+                        error_console.print("[bold red]重新登录失败，退出程序[/]")
+                        sys.exit(1)
+                else:
+                    # 保活成功，更新 session 和人数列表
+                    s = s_updated
+                    if stu_cnt_arr_updated:
+                        stu_cnt_arr = stu_cnt_arr_updated
+                    if stu_cnt_arr and int(target_index) < len(stu_cnt_arr) and len(stu_cnt_arr[int(target_index)]) >= 2:
+                        console.print(f"[bold green]✓ 会话保活成功，剩余人数: {stu_cnt_arr[int(target_index)][0] - stu_cnt_arr[int(target_index)][1]}[/]")
+                    else:
+                        console.print("[bold yellow]⚠ 会话保活成功，但无法获取剩余人数信息[/]")
+                    
+            # 【核心保活和倒计时逻辑】
             progress.update(
                 task,
                 advance = 1,
@@ -291,8 +316,7 @@ if __name__ == "__main__":
 
     # 开始抢课
     console.rule("[bold red]🚀 开始抢课！[/]")
-    # 先重新获取一次 session
-    s = login(user_name, password)
+    # 【移除不必要的重新登录】 抢课开始时不再重新登录，直接使用保活的 session (s)
     v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
     attempt = 1
     while True:
