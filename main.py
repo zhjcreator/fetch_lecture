@@ -33,6 +33,18 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return str(os.path.join(base_path, relative_path))
 
+import ssl
+from requests.adapters import HTTPAdapter
+
+class TLSAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.options |= 0x4
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
 
 # 生成浏览器指纹
 def generate_fingerprint():
@@ -119,6 +131,10 @@ def login(username: str, password: str, fingerprint=None):
         res = session.get(redirect_url, verify=False)
         if res.status_code != 200:
             raise Exception(f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]")
+
+        # 在访问 ehall 前重新 mount TLSAdapter
+        session.mount("https://", TLSAdapter())
+        session.mount("http://", TLSAdapter())       
         return session
     except Exception as e:
         error_console.print(Panel.fit(f"[bold red]✗ 登录失败: {str(e)}[/]", title="错误"))
