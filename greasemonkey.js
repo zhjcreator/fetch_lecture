@@ -1,11 +1,10 @@
 // ==UserScript==
-// @name          SEU研究生讲座抢课脚本 v2.2 (流式增强修复版)
+// @name          SEU研究生讲座抢课脚本 v2.4 (原生Cookie版)
 // @namespace     http://tampermonkey.net/
-// @version       2.2
-// @description   修复了 v2.1 导致的页面显示问题，并实现关键信息流式实时显示。
-// @author        Improved & Gemini
+// @version       2.4
+// @description   完全使用浏览器原生Cookie和Session发送请求
+// @author        Fixed Version
 // @match         https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*
-// @grant         GM_xmlhttpRequest
 // @grant         GM_setValue
 // @grant         GM_getValue
 // @require       https://cdn.jsdelivr.net/npm/sweetalert2@11
@@ -15,34 +14,31 @@
 (function() {
     'use strict';
 
-    console.log("✅ SEU Grab Script v2.2 (Stream Enhanced Fix) is Running!");
+    console.log("✅ SEU Grab Script v2.4 (Native Cookie Version) is Running!");
 
     const BASE_URL = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/";
     const KEY_OCR = 'seu_grab_ocr_endpoint';
+    const OCR_RETRY_MAX = 3;
     const OCR_TIMEOUT = 10000;
 
     let g_config = {
         ocrEndpoint: GM_getValue(KEY_OCR, 'http://127.0.0.1:5000/predict_base64'),
         isGrabbing: false,
-        ocrRetryCount: 0
+        keepAliveEnabled: true,
+        keepAliveInterval: 60000
     };
     let g_activeGrabWID = null;
-    let g_streamLogCounter = 0; // 记录流式日志条数
+    let g_streamLogCounter = 0;
+    let g_keepAliveTimer = null;
 
-    // --- 状态与日志显示函数 ---
+    // ===== 状态与日志函数 =====
 
-    /**
-     * 更新全局状态显示 (仅顶部控制栏)
-     */
     function updateStatus(msg) {
         const statusEl = document.getElementById('global-status-seu');
         if (statusEl) statusEl.textContent = `状态: ${msg}`;
         console.log(`[STATUS] ${msg}`);
     }
 
-    /**
-     * 向流式显示容器追加日志
-     */
     function logStream(msg, level = 'info') {
         const streamEl = document.getElementById('seu-stream-log');
         if (!streamEl) {
@@ -66,113 +62,117 @@
         logEntry.style.color = color;
         logEntry.innerHTML = `**[#${g_streamLogCounter}] [${now}]** ${msg}`;
 
-        // 确保容器不会无限增大，只保留最新的约 50 条记录
         if (streamEl.children.length >= 50) {
             streamEl.removeChild(streamEl.children[0]);
         }
 
         streamEl.appendChild(logEntry);
-        streamEl.scrollTop = streamEl.scrollHeight; // 滚动到底部实现流式效果
+        streamEl.scrollTop = streamEl.scrollHeight;
         console.log(`[${level.toUpperCase()}] ${msg}`);
     }
 
-    // --- 网络请求与核心函数 (增强日志) ---
+    // ===== 网络请求函数（使用原生Cookie）=====
 
     /**
-     * 带超时的 fetch 封装 (GM_xmlhttpRequest)
+     * 使用原生 fetch 和浏览器 Cookie - 自动处理会话
      */
-    function fetchWithTimeout(url, options = {}, timeout = 10000) {
-        return new Promise((resolve, reject) => {
-             Promise.race([
-                 new Promise((_, timeoutReject) =>
-                     setTimeout(() => timeoutReject(new Error('请求超时')), timeout)
-                 ),
-                 new Promise((fetchResolve, fetchReject) => {
-                     const defaultHeaders = {
-                         "Host": "ehall.seu.edu.cn",
-                         "Accept": "application/json, text/javascript, */*; q=0.01",
-                         "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
-                         ...options.headers
-                     };
+    async function fetchRequest(url, options = {}, timeout = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-                     GM_xmlhttpRequest({
-                         method: options.method || 'GET',
-                         url: url,
-                         headers: defaultHeaders,
-                         data: options.data,
-                         onload: fetchResolve,
-                         onerror: fetchReject,
-                         ontimeout: () => fetchReject(new Error('网络请求超时'))
-                     });
-                 })
-             ]).then(resolve).catch(reject);
-         });
+        try {
+            const fetchOptions = {
+                method: options.method || 'GET',
+                credentials: 'include',  // 关键：包含浏览器的所有Cookie
+                signal: controller.signal
+            };
+
+            // 只设置必要的请求头，其他由浏览器自动处理
+            if (options.headers) {
+                fetchOptions.headers = options.headers;
+            }
+
+            if (options.data) {
+                fetchOptions.body = options.data;
+            }
+
+            const response = await fetch(url, fetchOptions);
+            clearTimeout(timeoutId);
+
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('请求超时');
+            }
+            throw error;
+        }
     }
 
     /**
-    * 调用 ddddocr HTTP API（仅尝试一次）
-    */
+     * 调用 OCR API
+     */
     async function callOcrApi(base64Image, ocrEndpoint) {
         if (!ocrEndpoint) throw new Error('请配置 ddddocr HTTP API 地址');
 
-        // 提取 Base64 数据部分
         const b64_data = base64Image.includes(',')
-        ? base64Image.split(",")[1]
-        : base64Image;
+            ? base64Image.split(",")[1]
+            : base64Image;
 
         if (!b64_data) {
-            // 可能是图片抓取失败导致 base64Image 是空的
-            throw new Error('Base64 图片数据为空，无法发送 OCR 请求');
+            throw new Error('Base64 图片数据为空');
         }
 
-        try {
-            // 尝试进行一次 API 调用
-            const response = await fetchWithTimeout(
-                ocrEndpoint,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    data: JSON.stringify({ img_b64: b64_data })
-                },
-                OCR_TIMEOUT
-            );
+        for (let attempt = 1; attempt <= OCR_RETRY_MAX; attempt++) {
+            try {
+                const response = await fetchRequest(
+                    ocrEndpoint,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        data: JSON.stringify({ img_b64: b64_data })
+                    },
+                    OCR_TIMEOUT
+                );
 
-            if (response.status !== 200) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                if (response.status !== 200) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const ocrResult = (result.result || result.text || '').trim();
+
+                if (!ocrResult) {
+                    throw new Error('OCR 识别结果为空');
+                }
+
+                logStream(`✓ OCR 识别成功: **${ocrResult}**`, 'success');
+                return ocrResult;
+
+            } catch (error) {
+                logStream(`OCR 尝试 ${attempt}/${OCR_RETRY_MAX} 失败: ${error.message}`, 'warn');
+
+                if (attempt < OCR_RETRY_MAX) {
+                    await new Promise(r => setTimeout(r, 1000 * attempt));
+                } else {
+                    throw new Error(`OCR 识别失败（已重试 ${OCR_RETRY_MAX} 次）`);
+                }
             }
-
-            const result = JSON.parse(response.responseText);
-            // 兼容 ddddocr 的 'result' 和其他接口的 'text' 字段
-            const ocrResult = (result.result || result.text || '').trim();
-
-            if (!ocrResult) {
-                // 如果 API 调用成功但返回结果为空
-                throw new Error('OCR 识别结果为空');
-            }
-
-            logStream(`✓ OCR 识别成功: **${ocrResult}**`, 'success');
-            return ocrResult;
-
-        } catch (error) {
-            // 捕获所有错误（网络错误、HTTP 状态码错误、JSON 解析错误、识别结果为空）
-            logStream(`**OCR 识别失败:** ${error.message}`, 'error');
-            // 将错误抛出给上层调用者 (getCode) 处理
-            throw new Error(`OCR 识别失败: ${error.message}`);
         }
     }
 
     /**
-     * 获取验证码 (带重试)
+     * 获取验证码
      */
     async function getCode(retryCount = 0) {
         try {
             logStream(`正在获取验证码 (第 ${retryCount + 1} 次)...`);
             const c_url = BASE_URL + `hdyy/vcode.do?_=${Date.now()}`;
-            const response = await fetchWithTimeout(c_url, {
+            const response = await fetchRequest(c_url, {
                 method: 'POST'
             }, 5000);
 
-            const c_r = JSON.parse(response.responseText);
+            const c_r = await response.json();
             if (!c_r.result) throw new Error('验证码接口返回数据错误');
 
             const c_img_base64 = c_r.result;
@@ -182,7 +182,7 @@
 
         } catch (error) {
             if (retryCount < 2) {
-                logStream(`验证码获取失败，1秒后重试... 详情: ${error.message}`, 'warn');
+                logStream(`验证码获取失败，1秒后重试: ${error.message}`, 'warn');
                 await new Promise(r => setTimeout(r, 1000));
                 return getCode(retryCount + 1);
             }
@@ -199,18 +199,33 @@
         const form_data = `paramJson=${encodeURIComponent(JSON.stringify(data_json))}`;
         logStream(`**[REQUEST]** 发送抢课请求: WID=${hd_wid}, VCode=${ver_code}`);
 
-        const response = await fetchWithTimeout(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-            data: form_data
-        }, 5000);
+        try {
+            const response = await fetchRequest(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                data: form_data
+            }, 5000);
 
-        const result = JSON.parse(response.responseText);
-        return {
-            code: result.code,
-            msg: result.msg,
-            success: result.success || false
-        };
+            const responseText = await response.text();
+
+            // 检查是否是 HTML 响应（会话丢失）
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                logStream(`**❌ 会话已失效**，返回了 HTML 页面。请刷新页面重新登录。`, 'critical');
+                throw new Error('会话已失效，需要重新登录');
+            }
+
+            const result = JSON.parse(responseText);
+            return {
+                code: result.code,
+                msg: result.msg,
+                success: result.success || false
+            };
+        } catch (error) {
+            if (error.message.includes('会话已失效')) {
+                throw error;
+            }
+            throw new Error(`抢课请求失败: ${error.message}`);
+        }
     }
 
     /**
@@ -218,24 +233,103 @@
      */
     async function getLectureList() {
         const url = BASE_URL + `hdyy/queryActivityList.do?_=${Date.now()}`;
-        const response = await fetchWithTimeout(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            data: 'pageIndex=1&pageSize=100'
-        }, 5000);
+        try {
+            const response = await fetchRequest(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                data: 'pageIndex=1&pageSize=100'
+            }, 5000);
 
-        const json_data = JSON.parse(response.responseText);
-        if (!json_data.datas) throw new Error('讲座列表为空或格式错误');
+            const responseText = await response.text();
 
-        injectGrabButtons(json_data.datas);
-        return json_data.datas;
+            // 检查是否是 HTML 响应
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                logStream(`**❌ 会话已失效**，需要重新登录。`, 'critical');
+                throw new Error('会话已失效，请刷新页面重新登录');
+            }
+
+            const json_data = JSON.parse(responseText);
+            if (!json_data.datas) throw new Error('讲座列表为空或格式错误');
+
+            injectGrabButtons(json_data.datas);
+            return json_data.datas;
+
+        } catch (error) {
+            if (error.message.includes('会话已失效')) {
+                Swal.fire('会话失效', '您的登录状态已失效，请刷新页面重新登录', 'error');
+                throw error;
+            }
+            logStream(`获取讲座列表失败: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    // ===== 保活函数 =====
+
+    /**
+     * 保活请求 - 定期发送请求保持会话活跃
+     */
+    async function keepAliveRequest() {
+        if (!g_config.keepAliveEnabled || g_config.isGrabbing) {
+            return;
+        }
+
+        try {
+            const url = BASE_URL + `hdyy/queryActivityList.do?_=${Date.now()}`;
+            const response = await fetchRequest(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                data: 'pageIndex=1&pageSize=1'
+            }, 3000);
+
+            const responseText = await response.text();
+
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                console.warn('⚠️ 保活检测到会话已失效');
+                g_config.keepAliveEnabled = false;
+                logStream(`**⚠️ 警告：会话可能已失效**，请检查登录状态`, 'warn');
+                return;
+            }
+
+            const json_data = JSON.parse(responseText);
+            if (json_data.datas) {
+                console.log('✓ 保活成功 -', new Date().toLocaleTimeString());
+            }
+        } catch (error) {
+            console.error('✗ 保活请求失败:', error.message);
+        }
     }
 
     /**
-     * 高精度倒计时
+     * 启动保活定时器
      */
+    function startKeepAlive() {
+        if (g_keepAliveTimer) return;
+
+        logStream(`**启动保活** - 每 ${g_config.keepAliveInterval / 1000} 秒发送一次`, 'info');
+
+        keepAliveRequest();
+
+        g_keepAliveTimer = setInterval(() => {
+            keepAliveRequest();
+        }, g_config.keepAliveInterval);
+    }
+
+    /**
+     * 停止保活定时器
+     */
+    function stopKeepAlive() {
+        if (g_keepAliveTimer) {
+            clearInterval(g_keepAliveTimer);
+            g_keepAliveTimer = null;
+            logStream(`**停止保活**`, 'info');
+        }
+    }
+
+    // ===== 倒计时 =====
+
     async function waitUntil(targetTime, name) {
-        logStream(`**开始倒计时:** 【${name}】预约开始时间：${targetTime.toLocaleTimeString()}`);
+        logStream(`**开始倒计时:** 【${name}】目标时间：${targetTime.toLocaleTimeString()}`);
         while (g_config.isGrabbing) {
             const now = Date.now();
             let remaining = targetTime.getTime() - now;
@@ -255,19 +349,18 @@
         }
     }
 
-    /**
-     * 核心抢课逻辑
-     */
+    // ===== 抢课核心逻辑 =====
+
     async function startGrab(wid, yykssj, name, buttonElement) {
         if (g_config.isGrabbing) {
-             logStream(`有其他任务正在进行中 (WID: ${g_activeGrabWID})，本次操作被忽略。`, 'warn');
-             Swal.fire('提示', '请先停止当前抢课任务', 'warning');
-             return;
+            logStream(`有其他任务正在进行，本次操作被忽略。`, 'warn');
+            Swal.fire('提示', '请先停止当前抢课任务', 'warning');
+            return;
         }
 
         g_activeGrabWID = wid;
         g_config.isGrabbing = true;
-        g_streamLogCounter = 0; // 重置日志计数器
+        g_streamLogCounter = 0;
 
         const targetTime = new Date(yykssj.replace(/-/g, "/"));
         const originalText = buttonElement.textContent;
@@ -278,7 +371,6 @@
         logStream(`目标 WID: ${wid}`, 'info');
 
         try {
-            // 倒计时等待
             const remaining = targetTime.getTime() - Date.now();
             if (remaining > 50) {
                 await waitUntil(targetTime, name);
@@ -287,7 +379,6 @@
 
             if (!g_config.isGrabbing) return;
 
-            // 抢课循环
             let attempt = 1;
             let v_code = '';
             let lastOcrTime = 0;
@@ -297,10 +388,20 @@
                     updateStatus(`【${name}】第 ${attempt} 次尝试...`);
                     logStream(`**[ATTEMPT ${attempt}]** 开始尝试抢课...`, 'info');
 
-                    // 1. 获取列表 (保活 + 检查余量)
-                    const list = await getLectureList();
-                    const lecture = list.find(l => l.WID === wid);
+                    let list;
+                    try {
+                        list = await getLectureList();
+                    } catch (e) {
+                        if (e.message.includes('会话已失效')) {
+                            g_config.isGrabbing = false;
+                            logStream(`**抢课已停止：${e.message}**`, 'critical');
+                            Swal.fire('抢课停止', e.message, 'warning');
+                            return;
+                        }
+                        throw e;
+                    }
 
+                    const lecture = list.find(l => l.WID === wid);
                     if (!lecture) throw new Error('讲座已下架或列表获取失败');
 
                     const total = parseInt(lecture.HDZRS);
@@ -309,16 +410,15 @@
                     logStream(`余量检查: 总 ${total} / 已 ${booked} / 剩余 **${available}**`);
 
                     if (available <= 0) {
-                        logStream(`人数已满，暂停 2s 等待余量变化...`, 'warn');
+                        logStream(`人数已满，暂停 2s...`, 'warn');
                         await new Promise(r => setTimeout(r, 2000));
                         attempt++;
                         continue;
                     }
 
-                    // 2. 获取验证码 (每次或错误时)
                     if (!v_code || attempt % 3 === 0) {
                         if (Date.now() - lastOcrTime < 1500) {
-                             await new Promise(r => setTimeout(r, 1500 - (Date.now() - lastOcrTime)));
+                            await new Promise(r => setTimeout(r, 1500 - (Date.now() - lastOcrTime)));
                         }
                         const codeResult = await getCode();
                         v_code = codeResult.v_code;
@@ -326,7 +426,6 @@
                         logStream(`获取新验证码: **${v_code}**`);
                     }
 
-                    // 3. 发送抢课请求
                     const result = await fetchLecture(wid, v_code);
 
                     if (result.success) {
@@ -337,33 +436,33 @@
                         break;
                     }
 
-                    // 4. 错误处理
                     if (result.msg.includes('验证码')) {
                         v_code = '';
-                        logStream(`抢课失败: **验证码错误**，重新获取验证码...`, 'warn');
+                        logStream(`抢课失败: **验证码错误**`, 'warn');
                     } else if (result.msg.includes('频繁')) {
                         logStream(`抢课失败: **请求频繁**，等待 5s...`, 'warn');
                         await new Promise(r => setTimeout(r, 5000));
                     } else if (result.msg.includes('已预约')) {
-                         g_config.isGrabbing = false;
-                         logStream(`**✅ 抢课任务结束：** ${result.msg}`, 'success');
-                         Swal.fire('提示', `【${name}】${result.msg}`, 'info');
-                         break;
+                        g_config.isGrabbing = false;
+                        logStream(`**✅ 抢课任务结束：** ${result.msg}`, 'success');
+                        Swal.fire('提示', `【${name}】${result.msg}`, 'info');
+                        break;
                     } else {
                         logStream(`抢课失败: **${result.msg}**`, 'error');
                     }
 
                     attempt++;
                     await new Promise(r => setTimeout(r, 300));
+
                 } catch (e) {
-                    logStream(`**[ATTEMPT ${attempt}]** 抢课循环发生异常: ${e.message}`, 'error');
+                    logStream(`**[ATTEMPT ${attempt}]** 异常: ${e.message}`, 'error');
                     attempt++;
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
 
         } catch (e) {
-            logStream(`**[CRITICAL]** 任务异常中断: ${e.message}`, 'critical');
+            logStream(`**[CRITICAL]** 任务中断: ${e.message}`, 'critical');
             Swal.fire('异常', e.message, 'error');
             updateStatus(`错误: ${e.message}`);
         } finally {
@@ -375,11 +474,8 @@
         }
     }
 
-    // --- 界面交互函数 ---
+    // ===== UI 交互 =====
 
-    /**
-     * 处理抢课按钮点击
-     */
     function handleGrabButtonClick(event) {
         event.preventDefault();
         const btn = event.currentTarget;
@@ -405,9 +501,6 @@
         startGrab(wid, yykssj, name, btn);
     }
 
-    /**
-     * 停止抢课
-     */
     function handleStopClick() {
         if (g_activeGrabWID) {
             const activeBtn = document.querySelector(`.grab-btn-seu[data-wid="${g_activeGrabWID}"]`);
@@ -423,9 +516,6 @@
         Swal.close();
     }
 
-    /**
-     * 注入按钮
-     */
     function injectGrabButtons(lectureList) {
         const tbody = document.querySelector('tbody[id^="tbody_"]');
         if (!tbody) return;
@@ -438,17 +528,16 @@
             const actionCell = row.querySelector('td:first-child');
             if (!actionCell) return;
 
-            // 清除原有内容（如官方的“立即预约”）
             actionCell.innerHTML = '';
 
             const btnHtml = `
-                 <button class="grab-btn-seu"
-                     data-wid="${lecture.WID}"
-                     data-yykssj="${lecture.YYKSSJ}"
-                     data-name="${lecture.JZMC}"
-                     style="padding: 5px 8px; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; margin: 2px;">
-                     立即抢课
-                 </button>
+                <button class="grab-btn-seu"
+                    data-wid="${lecture.WID}"
+                    data-yykssj="${lecture.YYKSSJ}"
+                    data-name="${lecture.JZMC}"
+                    style="padding: 5px 8px; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; margin: 2px;">
+                    立即抢课
+                </button>
             `;
 
             actionCell.insertAdjacentHTML('beforeend', btnHtml);
@@ -462,9 +551,6 @@
         });
     }
 
-    /**
-     * 注入控制栏 (修复版，使用 position: fixed 实现悬浮日志)
-     */
     function injectControlHeader() {
         if (document.getElementById('seu-control-header')) return;
 
@@ -472,7 +558,7 @@
 
         const headerHtml = `
             <div id="seu-control-header" style="margin-bottom: 15px; padding: 10px; border: 2px solid #4CAF50; border-radius: 4px; background-color: #f9f9f9;">
-                <h3 style="margin-top: 0; color: #4CAF50;">🎓 SEU 抢课助手 v2.2 (流式增强修复版)</h3>
+                <h3 style="margin-top: 0; color: #4CAF50;">🎓 SEU 抢课助手 v2.4 (原生Cookie版)</h3>
 
                 <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; align-items: center;">
                     <label style="font-weight: bold; white-space: nowrap;">OCR API:</label>
@@ -484,25 +570,29 @@
                 </div>
 
                 <p id="global-status-seu" style="margin: 5px 0; font-weight: bold; color: #333;">状态: 待机</p>
+
+                <div style="margin-top: 10px; padding: 8px; background-color: #e8f5e9; border-radius: 4px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="keep-alive-switch" checked style="width: 16px; height: 16px; cursor: pointer;">
+                        <span style="font-weight: bold; color: #2e7d32;">启用保活 (每60秒)</span>
+                    </label>
+                    <p id="keep-alive-status" style="margin: 5px 0 0 0; font-size: 12px; color: #558b2f;">保活已启用</p>
+                </div>
             </div>
         `;
 
-        // 悬浮日志流容器 (position: fixed 确保不影响页面流)
         const streamHtml = `
             <div id="seu-stream-container" style="position: fixed; top: 10px; right: 10px; width: 350px; max-height: 400px; padding: 10px; border: 1px solid #ddd; background-color: rgba(255, 255, 255, 0.95); box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 6px; z-index: 10000;">
-                <h4 style="margin: 0 0 5px 0; color: #4CAF50;">实时日志流 (抢课详情)</h4>
+                <h4 style="margin: 0 0 5px 0; color: #4CAF50;">实时日志流</h4>
                 <div id="seu-stream-log" style="max-height: 350px; overflow-y: auto; background-color: #f0f0f0; padding: 5px; border-radius: 3px;">
                     <p style="margin: 0; font-size: 12px; color: #666;">日志流式显示区域...</p>
                 </div>
             </div>
         `;
 
-        // 策略恢复：将控制栏插入到表格之前
         const table = document.querySelector('table.zero-grid');
         if (table) {
             table.insertAdjacentHTML('beforebegin', headerHtml);
-
-            // 将悬浮日志流容器插入到 body 顶部，确保全局可见
             document.body.insertAdjacentHTML('afterbegin', streamHtml);
 
             document.getElementById('refresh-list-btn-seu').addEventListener('click', () => {
@@ -511,7 +601,6 @@
                 getLectureList().catch(e => {
                     updateStatus(`获取失败: ${e.message}`);
                     logStream(`列表获取失败: ${e.message}`, 'error');
-                    Swal.fire('错误', e.message, 'error');
                 });
             });
 
@@ -524,17 +613,42 @@
                 Swal.fire('成功', `已保存: ${newOcr}`, 'success');
                 logStream(`已保存 OCR API 地址: **${newOcr}**`, 'info');
             });
+
+            document.getElementById('keep-alive-switch').addEventListener('change', (e) => {
+                g_config.keepAliveEnabled = e.target.checked;
+                const statusEl = document.getElementById('keep-alive-status');
+
+                if (e.target.checked) {
+                    startKeepAlive();
+                    statusEl.textContent = '保活已启用';
+                    statusEl.style.color = '#558b2f';
+                } else {
+                    stopKeepAlive();
+                    statusEl.textContent = '保活已禁用';
+                    statusEl.style.color = '#c62828';
+                }
+            });
+
+            startKeepAlive();
         }
     }
 
     window.addEventListener('load', () => {
-        // 延迟加载确保页面元素到位
         setTimeout(() => {
             injectControlHeader();
-            // 自动触发一次列表刷新，加载按钮
             document.getElementById('refresh-list-btn-seu')?.click();
         }, 1500);
     });
-    unsafeWindow.getCode = getCode;
+
+    window.addEventListener('beforeunload', () => {
+        stopKeepAlive();
+    });
+
+    // 暴露函数到全局
+    unsafeWindow.seu_getCode = getCode;
+    unsafeWindow.seu_startGrab = startGrab;
+    unsafeWindow.seu_getLectureList = getLectureList;
+    unsafeWindow.seu_config = g_config;
+    unsafeWindow.seu_fetchLecture=fetchLecture
 
 })();

@@ -1,17 +1,25 @@
 import base64
 import os
 import io
+import sys
 from flask import Flask, request, jsonify
 from PIL import Image
 import ddddocr
 
-from main import resource_path
+from flask_cors import CORS # 导入 CORS
 
 app = Flask(__name__)
-
+CORS(app, resources={r"/*": {"origins": ["https://ehall.seu.edu.cn"], "supports_credentials": True}})
 # 全局 OCR 模型实例
 ocr = None 
 captcha_hash_table = {}
+
+def resource_path(relative_path):
+    if getattr(sys, 'frozen', False):  # 判断是否处于打包环境
+        base_path = getattr(sys, '_MEIPASS', '')  # 临时解压路径
+    else:
+        base_path = os.path.abspath(".")
+    return str(os.path.join(base_path, relative_path))
 
 @app.route('/predict', methods=['POST'])
 def predict():

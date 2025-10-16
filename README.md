@@ -65,70 +65,105 @@ uv pip install .
 pip install ddddocr>=1.5.6 pillow>=11.3.0 pycryptodome>=3.23.0 requests>=2.32.5 rich>=14.1.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
+## 油猴脚本使用说明
+
+### 脚本功能
+
+SEU研究生讲座抢课脚本 v2.4 (原生Cookie版)是一个浏览器扩展脚本，用于自动抢占研究生讲座名额，主要功能包括：
+
+- **一键抢课**：在讲座预约页面为每个讲座添加"立即抢课"按钮
+- **定时抢课**：根据讲座开放时间自动开始抢课
+- **自动验证码识别**：通过OCR API自动识别验证码
+- **会话保活**：定期发送请求保持登录状态，避免会话失效
+- **实时日志**：显示抢课过程的详细日志信息
+- **状态监控**：实时显示抢课状态和进度
+
+### 油猴插件安装方法
+
+1. **安装油猴插件（Tampermonkey）**：
+   - **Chrome/Edge浏览器**：访问 [Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) 安装
+   - **Firefox浏览器**：访问 [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/) 安装
+   - **Safari浏览器**：访问 [Safari App Store](https://apps.apple.com/us/app/tampermonkey/id1482490089) 安装
+   - 安装完成后，浏览器右上角会出现油猴插件图标
+
+2. **安装脚本**：
+   - 点击浏览器右上角的油猴插件图标
+   - 选择"添加新脚本"
+   - 复制项目中 `greasemonkey.js` 文件的完整内容
+   - 粘贴到油猴编辑器中
+   - 点击编辑器左上角的"文件" → "保存"（或按Ctrl+S）
+   - 脚本安装完成后，会在油猴插件的已安装脚本列表中显示
+
+### 配置设置
+
+1. **OCR API配置**：
+   - 默认OCR API地址：`http://127.0.0.1:5000/predict_base64`
+   - 可以使用项目中的 `ddddocr_api.py` 作为OCR服务
+   - 在脚本界面的输入框中可以自定义OCR API地址并保存
+
+2. **保活功能**：
+   - 默认启用会话保活功能（每60秒发送一次请求）
+   - 可以通过界面上的复选框启用或禁用保活功能
+
+### 使用步骤
+
+1. **启动OCR服务**：
+   - 运行 `ddddocr_api.py` 启动本地OCR服务
+   - 确保服务在 `http://127.0.0.1:5000` 端口运行
+
+2. **登录系统**：
+   - 打开东南大学研究生讲座预约系统：`https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/`
+   - 使用校园账号登录系统
+
+3. **开始抢课**：
+   - 页面加载后，脚本会自动注入控制界面
+   - 在讲座列表中，点击目标讲座旁的"立即抢课"按钮
+   - 脚本会自动进行抢课操作，实时显示进度
+
+4. **查看日志**：
+   - 页面右上角会显示实时日志流，记录抢课过程的详细信息
+   - 可以查看验证码识别结果、抢课尝试次数等信息
+
+5. **停止抢课**：
+   - 点击控制界面中的"停止全部"按钮可以停止所有抢课任务
+   - 抢课成功或失败后，任务会自动停止
+
+### 注意事项
+
+- 请确保OCR服务正常运行，否则验证码无法自动识别
+- 如遇会话失效，请刷新页面重新登录
+- 抢课成功后会有弹窗提示
+- 建议在讲座开放前1-2分钟开始准备，确保系统稳定
+
 ## 更新日志
 
-### 2025/10/09 更新
+**2025/10/09**
+- 支持自定义模型识别验证码
+- 修复SSL证书验证失败问题
 
-1. **多因素认证支持**: 实现手机验证码功能，支持非可信设备登录验证
-   - 新增 `get_mobile_verify_code()` 函数，用于发送手机验证码
-   - 优化登录流程，当检测到非可信设备时自动引导用户输入手机验证码
+**2025/10/08**
+- 支持非可信设备验证码
+- 添加指纹生成功能
 
-2. **配置优化**: 在配置文件中增加指纹存储，下次启动时自动使用已保存的指纹
+**2025/10/07**
+- 修复验证码识别问题
+- 优化登录流程
 
-3. **项目结构优化**: 更新了项目依赖管理，使用uv作为虚拟环境和包管理工具
+**2024/06/08**
+- 修复指纹识别问题
 
-### 2025/04/16 更新
+**2023/10/10**
+- 优化验证码识别
 
-更新界面，优化抢课逻辑
+**2023/04/22**
+- 修复依赖缺失问题
 
-### 2025/04/08 更新
+**2023/04/20**
+- 修复登录问题
 
-尝试通过降低ssl安全级别以解决校园网内报错`unsafe legacy renegotiation disabled`
+**2023/04/18**
+- 修复无法识别验证码问题
 
-### 2024/10/29 更新
-
-验证码、预约功能已恢复，但是发现验证码识别正确率偏低，以及经常触发“请勿多设备登录……” [@Golevka2001](https://github.com/Golevka2001)
-
-
-### 2023/11/13 更新
-
-1. 修复 [Issue #8](https://github.com/zhjcreator/fetch_lecture/issues/8) 反馈的问题，错误原因为：身份认证后忘记更新 Headers，Content-Type 没有从 `application/json` 改为 `application/x-www-form-urlencoded`。目前本地测试通过，如仍存在问题请继续反馈。
-
-### 2023/11/12 更新
-
-1. 修复 ddddocr 与 pillow 版本的问题，且限制 python 版本在 3.9 及以下
-2. TODO：[Issue #8](https://github.com/zhjcreator/fetch_lecture/issues/8) 反馈的问题，需等待下一轮预约开放后测试
-
-### 2023/11/7 更新
-
-1. 修复身份验证问题（没有手动获取 cookie 的必要）
-
-2. 更新依赖
-
-3. 剔除旧版/无用代码
-
-### 2023/11/6 更新
-
-1. seu_auth.py, login_to_ehall.py 改自 https://github.com/Golevka2001/SEU-Auth.git
-
-2. 由于登录讲座页面时无法自动获取 cookie，此处采用手动获取 cookie 的方式
-
-   2.1 进入 http://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do#/hdyy 网站
-
-   2.2 按 F12，刷新页面，按如图顺序找到该页面对应 cookie
-
-   ![图片缺失](./images/cookie.png)
-
-   2.3 将 cookie 贴入 main.py，赋值给 main(lecture_cookie)的参数 lecture_cookie
-
-   ```python
-   if __name__ == '__main__':
-       lecture_cookie = '[你的cookie]'
-       main(lecture_cookie)
-   ```
-
-3. 添加了捡漏功能
-
-### 2022/4/20 更新
-
-使用 ddddocr 识别验证码，玄学验证，大概 80%成功率。等数据集收集完成可能更新为私有模型。
+**2022/04/20**
+- 项目初始化
+- 支持讲座列表查询
