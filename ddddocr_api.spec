@@ -5,8 +5,23 @@ a = Analysis(
     ['ddddocr_api.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[
+        ('model.onnx', '.'),
+        ('charsets.json', '.'),
+        ('captcha_hash_table.csv', '.')
+    ],
+    hiddenimports=[
+        'ddddocr',
+        'ddddocr.recognizer',
+        'ddddocr.detector',
+        'ddddocr.utils',
+        'flask',
+        'threading',
+        'base64',
+        'json',
+        'io',
+        'os'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -19,8 +34,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
-    exclude_binaries=True,
+    a.binaries,
+    a.datas,
+    exclude_binaries=False,  # 设置为False以包含所有依赖
     name='ddddocr_api',
     debug=False,
     bootloader_ignore_signals=False,
@@ -32,13 +48,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='ddddocr_api',
 )
