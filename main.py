@@ -238,18 +238,19 @@ if __name__ == "__main__":
             with open("config.txt", "w") as f:
                 f.write(f"{user_name}\n{password}\n{fingerprint}\n")
 
-    # 获取讲座列表
-    console.print(Panel.fit(f"[bold]🕒 {time.ctime()} 开始登录系统...[/]", title="状态"))
+# 第一次登录：获取讲座列表和初始Session
+    console.print(Panel.fit(f"[bold]🕒 {time.ctime()} 首次尝试登录系统并获取讲座列表...[/]", title="状态"))
     s, lecture_list, stu_cnt_arr = login_and_get_lecture_list(user_name, password, fingerprint)
-    if lecture_list is not None:
-        print_lecture_list(lecture_list)
-    else:
-        error_console.print("[bold red]✗ 讲座列表为空，无法打印[/]")
+    if lecture_list is None:
+        error_console.print("[bold red]✗ 登录或获取讲座列表失败，退出程序[/]")
+        sys.exit(1)
+        
+    print_lecture_list(lecture_list)
 
-    # 选择讲座
+    # 选择讲座 (保持不变)
     target_index = Prompt.ask("请输入课程序号", console=console, default="0")
     try:
-        lecture_info = lecture_list[int(target_index)]  # pyright: ignore[reportOptionalSubscript]
+        lecture_info = lecture_list[int(target_index)]
     except (ValueError, IndexError, TypeError):
         error_console.print("[bold red]✗ 输入的课程序号无效，请输入有效的序号[/]")
         sys.exit(1)
@@ -259,44 +260,91 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # 等待抢课 - 使用本地时间
-    start_time = datetime.datetime.now()
     target_time = datetime.datetime.strptime(lecture_info["YYKSSJ"], "%Y-%m-%d %H:%M:%S")
     
+    # 提前重新登录的时间（秒）。目标时间前 10 秒重新登录，确保 session 最新
+    RELOGIN_BEFORE_SECONDS = 10 
+    
+    # 倒计时延迟（秒）。目标时间结束后再延迟 0.5 秒开始抢课循环
+    START_DELAY_SECONDS = 0.5 
+
     with Progress() as progress:
+        start_time = datetime.datetime.now()
+        total_seconds = (target_time - start_time).total_seconds()
+        
+        # total_seconds 可能为负，确保总数合理
         task = progress.add_task(
             f"[red]等待抢课 | 目标时间: {target_time.strftime('%H:%M:%S')}",
-            total = (target_time - start_time).total_seconds()
+            total=max(total_seconds, 1) # 至少是 1
         )
+        
+        relogin_done = False
 
-        while not progress.finished:
+        while True:
             current_time = datetime.datetime.now()
             remaining = (target_time - current_time).total_seconds()
+            
+            # 检查是否需要提前重新登录
+            if not relogin_done and 0 < remaining <= RELOGIN_BEFORE_SECONDS:
+                console.rule(f"[bold yellow]🕒 目标时间前 {RELOGIN_BEFORE_SECONDS} 秒，进行二次登录...[/]")
+                s = login(user_name, password, fingerprint)
+                if s is None:
+                    error_console.print("[bold red]✗ 提前二次登录失败，退出程序[/]")
+                    sys.exit(1)
+                console.print("[bold green]✓ 二次登录成功！[/]")
+                relogin_done = True
 
-            if remaining <= 0:
-                progress.update(task, completed = (target_time - start_time).total_seconds())
+
+            if remaining <= -START_DELAY_SECONDS:
+                # 倒计时结束且延迟时间已过
+                progress.update(task, completed=max(total_seconds, 1))
                 break
             
+            if remaining <= 0:
+                 # 已经到达目标时间，开始延迟计时
+                progress.update(
+                    task,
+                    completed=total_seconds,
+                    description=f"[bold red]⏰ 目标已到，延迟 {abs(remaining):.2f} / {START_DELAY_SECONDS:.2f} 秒开始抢课...[/]"
+                )
+                time.sleep(0.01) # 微小延迟，保持 CPU 占用合理
+                continue
+            
+            # 正常倒计时更新
             progress.update(
                 task,
-                advance = 1,
-                description = f"[bold cyan]等待抢课，剩余时间: {str(datetime.timedelta(seconds=int(remaining)))}[/] | 目标时间: {target_time.strftime('%H:%M:%S')}"
+                completed=total_seconds - remaining, # 计算已完成的进度
+                description=f"[bold cyan]⏳ 剩余时间: {str(datetime.timedelta(seconds=int(remaining)))}.{int((remaining % 1) * 10):<1} 秒[/] | 目标时间: {target_time.strftime('%H:%M:%S')}"
             )
-            time.sleep(1)
+            
+            # 根据剩余时间调整休眠，越接近目标时间越频繁
+            if remaining > 60:
+                time.sleep(1)
+            elif remaining > 10:
+                time.sleep(0.5)
+            elif remaining > 2:
+                time.sleep(0.1)
+            else:
+                time.sleep(0.01) # 接近 0 时采用更精细的等待
 
-    # 倒计时结束后重新登录
-    console.rule("[bold red]🚀 倒计时结束，重新登录！[/]")
-    s = login(user_name, password, fingerprint)
-    if s is None:
-        error_console.print("[bold red]✗ 重新登录失败，退出程序[/]")
-        sys.exit(1)
+    # 抢课循环开始
+    console.rule(f"[bold red]🚀 延迟 {START_DELAY_SECONDS} 秒结束，开始抢课！[/]")
     
-    console.print("[bold green]✓ 重新登录成功，开始抢课！[/]")
+    # 确保在开始抢课时 s 是最新的（如果在倒计时期间没有触发二次登录，这里相当于补一个）
+    if not relogin_done:
+         console.rule("[bold yellow]🕒 未触发二次登录，进行最终登录检查...[/]")
+         s = login(user_name, password, fingerprint)
+         if s is None:
+             error_console.print("[bold red]✗ 最终登录失败，退出程序[/]")
+             sys.exit(1)
+         console.print("[bold green]✓ 最终登录检查成功，开始抢课！[/]")
     
-    # 创建验证码保存目录
+    # 创建验证码保存目录 (保持不变)
     if save_code:
         os.makedirs("code_img/true", exist_ok=True)
         os.makedirs("code_img/false", exist_ok=True)
     
+    # 第一次获取验证码
     v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
     attempt = 1
     while True:
