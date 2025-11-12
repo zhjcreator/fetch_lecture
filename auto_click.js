@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SEU 素质讲座抢课脚本 (v1.6 - 可视化配置)
+// @name         SEU 素质讲座抢课脚本 (v1.6.1 - 增加点击延迟)
 // @namespace    http://tampermonkey.net/
-// @version      1.6
-// @description  增加抢课前权限检查和任务取消功能，并提供API和延迟的可视化配置。
+// @version      1.6.1
+// @description  增加抢课前权限检查和任务取消功能，并提供API和延迟的可视化配置，增加倒计时结束后的点击延迟。
 // @author       Your Senior Software Engineer
 // @match        https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*
 // @grant        GM_addStyle
@@ -17,7 +17,8 @@
 
     // --- 全局配置 ---
     const DEFAULT_CAPTCHA_API_ENDPOINT = 'http://127.0.0.1:5000/predict_base64';
-    const DEFAULT_CAPTCHA_CLICK_DELAY_MS = 100; // 识别成功后点击“确定”的延迟
+    const DEFAULT_CAPTCHA_CLICK_DELAY_MS = 100; // 识别成功后点击"确定"的延迟
+    const DEFAULT_COUNTDOWN_END_DELAY_MS = 0; // 倒计时结束后点击"预约"按钮的延迟
     const CHECK_PERMISSION_ENDPOINT = 'https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/appiontCheck.do';
     const CHECK_INTERVAL_MS = 200;
     const COUNTDOWN_INTERVAL_MS = 30;
@@ -28,6 +29,7 @@
     let countdownTimer = null;
     let forceButtonInterval = null;
     let isProcessingCaptcha = false;
+    let clickTimeout = null; // 用于倒计时结束后的延迟点击
 
     // --- 核心功能函数 ---
 
@@ -44,7 +46,7 @@
     }
 
     /**
-     * 强制将所有非预约状态的按钮修改为可点击的“预约”按钮
+     * 强制将所有非预约状态的按钮修改为可点击的"预约"按钮
      */
     function forceAppointmentButtons() {
         if (!window.location.hash.includes('hdyy')) return;
@@ -160,7 +162,7 @@
                         const code = data.result;
                         logToPanel(`识别成功: <strong>${code}</strong>`, 'success');
                         vcodeInput.value = code;
-                        logToPanel(`已自动填写，将在 ${clickDelay}ms 后点击“确定”...`, 'info');
+                        logToPanel(`已自动填写，将在 ${clickDelay}ms 后点击"确定"...`, 'info');
 
                         // 使用从UI读取的延迟时间
                         setTimeout(() => {
@@ -191,7 +193,7 @@
         const panelHTML = `
             <div id="course-grabber-panel">
                 <div class="panel-header">
-                    <span>素质讲座抢课助手 v1.6</span>
+                    <span>素质讲座抢课助手 v1.6.1</span>
                     <div class="panel-buttons">
                         <button id="panel-toggle">-</button>
                         <button id="panel-close">×</button>
@@ -206,8 +208,12 @@
                             <input type="text" id="captcha-api-input" value="${DEFAULT_CAPTCHA_API_ENDPOINT}">
                         </div>
                         <div>
-                            <label for="captcha-delay-input">确认延迟(ms):</label>
+                            <label for="captcha-delay-input">验证码确认延迟(ms):</label>
                             <input type="number" id="captcha-delay-input" value="${DEFAULT_CAPTCHA_CLICK_DELAY_MS}" min="0" step="50">
+                        </div>
+                        <div>
+                            <label for="countdown-end-delay-input">倒计时结束延迟(ms):</label>
+                            <input type="number" id="countdown-end-delay-input" value="${DEFAULT_COUNTDOWN_END_DELAY_MS}" min="0" step="50">
                         </div>
                     </div>
 
@@ -311,7 +317,7 @@
     // --- 核心流程函数 ---
 
     /**
-     * 用户点击“开始预约”后触发的完整流程
+     * 用户点击"开始预约"后触发的完整流程
      */
     async function startGrabbingProcess() {
         const startBtn = document.getElementById('start-grabbing-btn');
@@ -378,9 +384,25 @@
             } else {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
-                logToPanel("时间到！开始模拟点击...", "success");
-                triggerClicks();
-                resetStartButton();
+                logToPanel("时间到！等待延迟后开始点击...", "success");
+                
+                // 获取倒计时结束后的延迟时间
+                const countdownEndDelay = Math.max(0, parseInt(document.getElementById('countdown-end-delay-input').value, 10)) || DEFAULT_COUNTDOWN_END_DELAY_MS;
+                
+                if (countdownEndDelay > 0) {
+                    logToPanel(`将在 ${countdownEndDelay}ms 后开始模拟点击...`, "info");
+                    startBtn.textContent = `取消 (${countdownEndDelay}ms后点击)`;
+                    
+                    // 设置倒计时结束后的延迟点击
+                    clickTimeout = setTimeout(() => {
+                        triggerClicks();
+                        resetStartButton();
+                    }, countdownEndDelay);
+                } else {
+                    // 如果没有延迟，立即触发点击
+                    triggerClicks();
+                    resetStartButton();
+                }
             }
         }, COUNTDOWN_INTERVAL_MS);
     }
@@ -392,13 +414,17 @@
         if (countdownTimer) {
             clearInterval(countdownTimer);
             countdownTimer = null;
-            logToPanel("任务已手动取消。", "warning");
-            resetStartButton();
         }
+        if (clickTimeout) {
+            clearTimeout(clickTimeout);
+            clickTimeout = null;
+        }
+        logToPanel("任务已手动取消。", "warning");
+        resetStartButton();
     }
 
     /**
-     * 重置“开始/取消”按钮到初始状态
+     * 重置"开始/取消"按钮到初始状态
      */
     function resetStartButton() {
         const startBtn = document.getElementById('start-grabbing-btn');
@@ -418,7 +444,7 @@
                     buttonToClick.click();
                     logToPanel(`已为 [${course.name}] 触发点击！等待验证码弹窗...`, 'success');
                 } else {
-                    logToPanel(`错误: 未能找到课程 [${course.name}] 的“预约”按钮。`, 'error');
+                    logToPanel(`错误: 未能找到课程 [${course.name}] 的"预约"按钮。`, 'error');
                 }
             }, index * CLICK_OFFSET_MS); // 错开点击，避免浏览器卡死
         });
@@ -459,7 +485,7 @@
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
             }
 
-            /* 新增配置样式 */
+            /* 配置样式 */
             .panel-settings {
                 padding: 8px;
                 background: #fdfdfd;
@@ -477,9 +503,10 @@
                 margin-right: 5px;
                 font-size: 13px;
                 white-space: nowrap;
+                min-width: 120px; /* 统一标签宽度 */
             }
             .panel-settings input {
-                flex-grow: 1; /* 让API输入框占满剩余空间 */
+                flex-grow: 1; /* 让输入框占满剩余空间 */
                 padding: 4px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
@@ -487,7 +514,7 @@
             }
             .panel-settings input[type="number"] {
                 flex-grow: 0;
-                width: 80px; /* 固定延迟输入框宽度 */
+                width: 80px; /* 固定数字输入框宽度 */
             }
 
             .panel-actions { display: flex; justify-content: space-around; margin-bottom: 10px; }
