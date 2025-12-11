@@ -67,9 +67,8 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
     
     # 设置 HTTP Headers，模拟浏览器发送 AJAX 请求
     headers = {
-        # ... (大部分保持不变，确保 Content-Type 正确)
         "Host": "ehall.seu.edu.cn",
-        "Accept": "application/json, text/javascript, */*; q=0.01",  # 典型的 AJAX 接受类型
+        "Accept": "application/json, text/javascript, */*; q=0.01",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "Origin": "https://ehall.seu.edu.cn",
         "Sec-Fetch-Site": "same-origin",
@@ -78,20 +77,24 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
         "Accept-Encoding": "gzip, deflate, br",
         "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-        "X-Requested-With": "XMLHttpRequest", # 模拟 AJAX 请求的关键 header
+        "X-Requested-With": "XMLHttpRequest",
     }
     
     ss.headers.update(headers)
     
     try:
-        # 使用 form_data 发送请求
-        r = ss.post(url, data=form_data)
+        r = ss.post(url, data=form_data, verify=False)
         
-        # 如果返回的是网页，说明返回值错误
+        # 调试输出
+        if not r.text.strip():
+            return 500, "服务器无响应（空内容）", False
         if r.headers.get("Content-Type", "").startswith("text/html"):
-            return 500,'请求错误，返回值为网页', False
+            return 500, f"返回HTML（可能登录失效）: {r.text[:100]}...", False
         
-        result = r.json()
+        try:
+            result = r.json()
+        except json.JSONDecodeError:
+            return 500, f"响应非JSON: {r.status_code} {r.text[:100]}...", False
 
         if result.get("success", False):
             console.print(Panel.fit(f"[bold green]抢课成功！[/]\n{json.dumps(result, indent=2)}", title="成功"))
@@ -101,8 +104,6 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
 
     except requests.exceptions.RequestException as e:
         return 500, f"网络请求异常: {str(e)}", False
-    except json.JSONDecodeError:
-        return 500, f"响应解析失败，非JSON格式: {r.text[:100]}...", False
 
 
 def get_code(ss, captcha_hash_table=None):
@@ -176,7 +177,7 @@ def get_lecture_list(session):
         return session, lecture_list, stu_cnt_arr
     except Exception as e:
         error_console.print(f"[bold red]✗ 获取讲座列表失败: {str(e)}[/]")
-        return None, None, None
+        return session, None, None
 
 
 def login_and_get_lecture_list(username: str, password: str, fingerprint=None):
@@ -263,10 +264,14 @@ if __name__ == "__main__":
     target_time = datetime.datetime.strptime(lecture_info["YYKSSJ"], "%Y-%m-%d %H:%M:%S")
     
     # 提前重新登录的时间（秒）。目标时间前 10 秒重新登录，确保 session 最新
-    RELOGIN_BEFORE_SECONDS = 10 
+    # RELOGIN_BEFORE_SECONDS = 10 
+    RELOGIN_BEFORE_SECONDS = Prompt.ask("请输入提前重新登录的时间（秒）", console=console, default=10)
+    RELOGIN_BEFORE_SECONDS = float(RELOGIN_BEFORE_SECONDS)
     
     # 倒计时延迟（秒）。目标时间结束后再延迟 0.5 秒开始抢课循环
-    START_DELAY_SECONDS = 0.5 
+    # START_DELAY_SECONDS = 0.5 
+    START_DELAY_SECONDS = Prompt.ask("请输入倒计时延迟（秒），可为负数", console=console, default=0.5)
+    START_DELAY_SECONDS = float(START_DELAY_SECONDS)
 
     with Progress() as progress:
         start_time = datetime.datetime.now()
@@ -371,8 +376,8 @@ if __name__ == "__main__":
                         with open(f"code_img/false/captcha_{attempt}_code{v_code}.jpg", "wb") as f:
                             f.write(v_img)
 
-                    # 验证码错误后随机延迟 0.1-0.9 秒
-                    random_delay = random.uniform(0.1, 0.9)
+                    # 验证码错误后随机延迟 0.1-0.5 秒
+                    random_delay = random.uniform(0.1, 0.5)
                     time.sleep(random_delay)
                     
                     v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
