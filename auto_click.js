@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SEU 素质讲座抢课脚本 (v1.6.1 - 增加点击延迟)
+// @name         SEU 素质讲座抢课脚本 (v1.7.0 - 暴力重试版)
 // @namespace    http://tampermonkey.net/
-// @version      1.6.1
-// @description  增加抢课前权限检查和任务取消功能，并提供API和延迟的可视化配置，增加倒计时结束后的点击延迟。
+// @version      1.7.0
+// @description  增加抢课前权限检查和任务取消功能，可视化配置API和延迟，支持验证码识别后持续自动点击确定直到成功。
 // @author       Your Senior Software Engineer
 // @match        https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*
 // @grant        GM_addStyle
@@ -17,8 +17,9 @@
 
     // --- 全局配置 ---
     const DEFAULT_CAPTCHA_API_ENDPOINT = 'http://127.0.0.1:5000/predict_base64';
-    const DEFAULT_CAPTCHA_CLICK_DELAY_MS = 100; // 识别成功后点击"确定"的延迟
-    const DEFAULT_COUNTDOWN_END_DELAY_MS = 0; // 倒计时结束后点击"预约"按钮的延迟
+    const DEFAULT_CAPTCHA_CLICK_DELAY_MS = 100; // 识别成功后点击"确定"的初始延迟
+    const DEFAULT_COUNTDOWN_END_DELAY_MS = 0;   // 倒计时结束后点击"预约"按钮的延迟
+    const DEFAULT_REPEAT_CLICK_MS = 200;        // 验证码确认按钮的重复点击间隔
     const CHECK_PERMISSION_ENDPOINT = 'https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/appiontCheck.do';
     const CHECK_INTERVAL_MS = 200;
     const COUNTDOWN_INTERVAL_MS = 30;
@@ -30,6 +31,7 @@
     let forceButtonInterval = null;
     let isProcessingCaptcha = false;
     let clickTimeout = null; // 用于倒计时结束后的延迟点击
+    let captchaLoopId = null; // 用于验证码界面的循环点击
 
     // --- 核心功能函数 ---
 
@@ -41,7 +43,8 @@
         if (typeof unsafeWindow.serverTime !== 'undefined') {
             return unsafeWindow.serverTime;
         }
-        logToPanel("警告: 无法获取准确的服务器时间，将使用本地时间，可能存在误差。", "warning");
+        // 降低日志频率，避免刷屏
+        // logToPanel("警告: 无法获取准确的服务器时间，将使用本地时间，可能存在误差。", "warning");
         return Date.now();
     }
 
@@ -134,7 +137,8 @@
 
         // 从UI读取动态配置
         const currentApiEndpoint = document.getElementById('captcha-api-input').value || DEFAULT_CAPTCHA_API_ENDPOINT;
-        const clickDelay = Math.max(0, parseInt(document.getElementById('captcha-delay-input').value, 10)) || DEFAULT_CAPTCHA_CLICK_DELAY_MS;
+        const initialClickDelay = Math.max(0, parseInt(document.getElementById('captcha-delay-input').value, 10)) || DEFAULT_CAPTCHA_CLICK_DELAY_MS;
+        const repeatClickInterval = Math.max(50, parseInt(document.getElementById('repeat-click-input').value, 10)) || DEFAULT_REPEAT_CLICK_MS;
 
         const vcodeImg = modalNode.querySelector('#vcodeImg');
         const vcodeInput = modalNode.querySelector('#vcodeInput');
@@ -147,11 +151,11 @@
         }
 
         const base64Data = vcodeImg.src.split(',')[1];
-        logToPanel(`正在发送验证码到 [${currentApiEndpoint}] 进行识别...`);
+        // logToPanel(`正在发送验证码到 [${currentApiEndpoint}] 进行识别...`);
 
         GM_xmlhttpRequest({
             method: "POST",
-            url: currentApiEndpoint, // 使用从UI读取的API地址
+            url: currentApiEndpoint,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify({ img_b64: base64Data }),
             timeout: 5000,
@@ -162,22 +166,46 @@
                         const code = data.result;
                         logToPanel(`识别成功: <strong>${code}</strong>`, 'success');
                         vcodeInput.value = code;
-                        logToPanel(`已自动填写，将在 ${clickDelay}ms 后点击"确定"...`, 'info');
+                        logToPanel(`将在 ${initialClickDelay}ms 后开始点击，若弹窗未消失则每 ${repeatClickInterval}ms 重试...`, 'info');
 
-                        // 使用从UI读取的延迟时间
+                        // 核心修改逻辑：持续点击直到弹窗消失
                         setTimeout(() => {
+                            let clickCount = 0;
+                            // 先点击一次
                             confirmButton.click();
-                        }, clickDelay);
+                            clickCount++;
+                            
+                            // 启动循环检测点击
+                            if (captchaLoopId) clearInterval(captchaLoopId);
+                            
+                            captchaLoopId = setInterval(() => {
+                                // 检查弹窗是否存在于DOM中且显示状态正常
+                                if (document.body.contains(modalNode) && modalNode.style.display !== 'none') {
+                                    confirmButton.click();
+                                    clickCount++;
+                                    // 每点击10次在控制台输出一次，避免刷屏
+                                    if (clickCount % 10 === 0) {
+                                        console.log(`[抢课脚本] 验证码弹窗未消失，已重试点击 ${clickCount} 次...`);
+                                    }
+                                } else {
+                                    // 弹窗消失，说明成功提交或被手动关闭
+                                    clearInterval(captchaLoopId);
+                                    captchaLoopId = null;
+                                    isProcessingCaptcha = false; // 释放锁，允许处理下一个可能的弹窗
+                                    logToPanel(`验证码弹窗已消失 (共点击 ${clickCount} 次)，操作结束。`, 'success');
+                                }
+                            }, repeatClickInterval);
+
+                        }, initialClickDelay);
 
                     } else { throw new Error(data.error || "API未返回result字段"); }
                 } catch (e) {
                     logToPanel(`错误：处理识别结果失败: ${e.message}`, 'error');
-                } finally {
                     isProcessingCaptcha = false;
                 }
             },
             onerror: function(response) {
-                logToPanel("错误：连接验证码识别服务失败！请检查Python服务是否已在本地运行。", 'error');
+                logToPanel("错误：连接验证码识别服务失败！", 'error');
                 isProcessingCaptcha = false;
             },
             ontimeout: function() {
@@ -193,7 +221,7 @@
         const panelHTML = `
             <div id="course-grabber-panel">
                 <div class="panel-header">
-                    <span>素质讲座抢课助手 v1.6.1</span>
+                    <span>SEU抢课助手 v1.7.0 (暴力重试版)</span>
                     <div class="panel-buttons">
                         <button id="panel-toggle">-</button>
                         <button id="panel-close">×</button>
@@ -208,8 +236,12 @@
                             <input type="text" id="captcha-api-input" value="${DEFAULT_CAPTCHA_API_ENDPOINT}">
                         </div>
                         <div>
-                            <label for="captcha-delay-input">验证码确认延迟(ms):</label>
+                            <label for="captcha-delay-input" title="识别出验证码后多久进行第一次点击">首次点击延迟(ms):</label>
                             <input type="number" id="captcha-delay-input" value="${DEFAULT_CAPTCHA_CLICK_DELAY_MS}" min="0" step="50">
+                        </div>
+                        <div>
+                            <label for="repeat-click-input" title="如果弹窗没消失，多久点一次确定">失败重试间隔(ms):</label>
+                            <input type="number" id="repeat-click-input" value="${DEFAULT_REPEAT_CLICK_MS}" min="50" step="50" style="color:red;font-weight:bold;">
                         </div>
                         <div>
                             <label for="countdown-end-delay-input">倒计时结束延迟(ms):</label>
@@ -419,6 +451,10 @@
             clearTimeout(clickTimeout);
             clickTimeout = null;
         }
+        if (captchaLoopId) {
+            clearInterval(captchaLoopId);
+            captchaLoopId = null;
+        }
         logToPanel("任务已手动取消。", "warning");
         resetStartButton();
     }
@@ -503,7 +539,7 @@
                 margin-right: 5px;
                 font-size: 13px;
                 white-space: nowrap;
-                min-width: 120px; /* 统一标签宽度 */
+                min-width: 130px; /* 统一标签宽度 */
             }
             .panel-settings input {
                 flex-grow: 1; /* 让输入框占满剩余空间 */
