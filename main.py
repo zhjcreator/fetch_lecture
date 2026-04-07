@@ -58,6 +58,7 @@ def generate_fingerprint():
 def fetch_lecture(hd_wid: str, ss, ver_code):
     """
     发送抢课（预约）请求，模拟类似 AJAX 的异步数据提交。
+    不再根据返回结果判断成功，仅返回状态信息。
     """
     url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
     
@@ -87,23 +88,54 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         
         # 调试输出
         if not r.text.strip():
-            return 500, "服务器无响应（空内容）", False
+            return 500, "服务器无响应（空内容）"
         if r.headers.get("Content-Type", "").startswith("text/html"):
-            return 500, f"返回HTML（可能登录失效）: {r.text[:100]}...", False
+            return 500, f"返回HTML（可能登录失效）: {r.text[:100]}..."
         
         try:
             result = r.json()
         except json.JSONDecodeError:
-            return 500, f"响应非JSON: {r.status_code} {r.text[:100]}...", False
+            return 500, f"响应非JSON: {r.status_code} {r.text[:100]}..."
 
-        if result.get("success", False):
-            console.print(Panel.fit(f"[bold green]抢课成功！[/]\n{json.dumps(result, indent=2)}", title="成功"))
-            sys.exit(0)
+        code = result.get("code", -1)
+        msg = result.get("msg", "未知错误")
+        success = result.get("success", False)
         
-        return result.get("code", -1), result.get("msg", "未知错误"), result.get("success", False)
+        return code, msg, success
 
     except requests.exceptions.RequestException as e:
         return 500, f"网络请求异常: {str(e)}", False
+
+
+def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
+    """
+    通过查询已预约讲座列表，判断指定讲座是否预约成功。
+    遍历多页结果以确保找到目标讲座。
+    """
+    url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryMyActivityList.do"
+    for page in range(1, max_page + 1):
+        try:
+            res = ss.post(
+                f"{url}?_={int(time.time() * 1000)}",
+                data={"pageIndex": page, "pageSize": 10, "sortField": "", "sortOrder": ""},
+                verify=False
+            )
+            result = res.json()
+            datas = result.get("datas", [])
+            
+            for item in datas:
+                if item.get("HD_WID") == target_wid:
+                    return True
+            
+            # 如果返回的数据少于 pageSize，说明没有更多数据了
+            if len(datas) < 10:
+                break
+                
+        except Exception as e:
+            error_console.print(f"[bold red]✗ 查询已预约讲座失败: {str(e)}[/]")
+            break
+    
+    return False
 
 
 def get_code(ss, captcha_hash_table=None):
@@ -352,6 +384,9 @@ if __name__ == "__main__":
     # 第一次获取验证码
     v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
     attempt = 1
+    check_interval = 5  # 每抢 N 次查询一次已预约列表
+    success_confirmed = False
+    
     while True:
         # 获取最新讲座列表
         s, _, stu_cnt_arr = get_lecture_list(s)
@@ -389,7 +424,20 @@ if __name__ == "__main__":
                             f.write(v_img)
 
                 if success:
-                    break
+                    console.print("[bold green]✓ 服务器返回预约成功，正在通过已预约列表确认...[/]")
+
+                # 定期查询已预约列表确认是否成功（每 check_interval 次或服务器返回成功时）
+                if attempt % check_interval == 0 or success:
+                    with console.status("[bold cyan]正在查询已预约讲座列表确认结果...[/]"):
+                        if check_booking_success(s, wid):
+                            console.print(Panel.fit(
+                                f"[bold green]🎉 抢课成功确认！[/]\n讲座WID: {wid}\n讲座名称: {lecture_info['JZMC']}\n于第 {attempt} 次尝试确认成功",
+                                title="✓ 成功"
+                            ))
+                            success_confirmed = True
+                            break
+                        elif success:
+                            console.print("[yellow]⚠ 服务器返回成功但已预约列表中未找到，可能存在延迟，继续尝试...[/]")
 
                 if "频繁" in msg:
                     console.print("[yellow]请求过于频繁，等待 10 秒后重试...[/]")
@@ -402,7 +450,8 @@ if __name__ == "__main__":
             time.sleep(1)
 
     # 退出处理
-    console.print(Panel.fit("[bold]按任意键退出...[/]", title="完成"))
+    if success_confirmed:
+        console.print(Panel.fit("[bold]按任意键退出...[/]", title="完成"))
     while True:
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
             sys.stdin.read(1)

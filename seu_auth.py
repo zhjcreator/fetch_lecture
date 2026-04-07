@@ -130,16 +130,17 @@ def seu_login(username, password, service_url='', fingerprint=None, mobile_verif
     Returns:
         session: 成功通过身份认证的session，用于后续访问其他服务
         redirect_url: 登录后重定向到所要访问的服务的url
+        error_info: 失败时返回错误信息字符串，成功时为 None
     """
     # 获取RSA公钥
     session, pub_key = get_pub_key()
     if not session:
-        return None, None, None
+        return None, None, "获取RSA公钥失败，请检查网络连接"
 
     # 使用服务器返回的RSA公钥加密用户密码
     encrypted_password = rsa_encrypt(password, pub_key)
     if not encrypted_password:
-        return None, None, None
+        return None, None, "密码加密失败"
 
     # 发起登录请求
     try:
@@ -163,21 +164,28 @@ def seu_login(username, password, service_url='', fingerprint=None, mobile_verif
 
         if res.status_code != 200:
             raise Exception(f'[{res.status_code} {res.reason}]')
-        if not res.json()['success']:
-            raise Exception(res.json()['info'])
+
+        result = res.json()
+        if not result.get('success'):
+            error_msg = result.get('info', '登录失败')
+            print(f'Authentication failed: {error_msg}')
+            if '非可信设备' in error_msg:
+                return session, None, 'non_trusted_device'
+            return None, None, error_msg
 
         print('Successfully authenticated')
 
         # 未指定服务，无需重定向，直接返回session
-        if res.json()['redirectUrl'] is None:
+        if result.get('redirectUrl') is None:
             return session, None, None
 
         # 指定服务，返回重定向url（含ticket）
-        redirect_url = unquote(res.json()['redirectUrl'])
+        redirect_url = unquote(result['redirectUrl'])
 
         return session, redirect_url, None
     except Exception as e:
         print('Failed to authenticate, info:', e)
-        if '非可信设备' in str(e):
+        error_str = str(e)
+        if '非可信设备' in error_str:
             return session, None, 'non_trusted_device'
-        return None, None, None
+        return None, None, f"认证请求异常: {error_str}"

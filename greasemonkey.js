@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name          SEU研究生讲座抢课脚本 v2.6 (原生Cookie版) - 最终防反爬优化
+// @name          SEU研究生讲座抢课脚本 v2.7 (预约确认版)
 // @namespace     http://tampermonkey.net/
-// @version       2.6
-// @description   使用原生Cookie和Session发送请求，增强了HTTP Header、随机延迟和预约前置校验，以应对反爬。
+// @version       2.7
+// @description   使用原生Cookie和Session发送请求，通过查询已预约列表确认抢课成功，思路与Python版本保持一致。
 // @author        Fixed Version
 // @match         https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*
 // @grant         GM_setValue
@@ -14,8 +14,8 @@
 (function() {
     'use strict';
 
-    // *** 版本更新到 2.6 并修改描述 ***
-    console.log("✅ SEU Grab Script v2.6 (Anti-Bot Optimized) is Running!");
+    // *** 版本更新到 2.7，核心改进：思路与Python版本一致，通过查询已预约列表确认成功 ***
+    console.log("✅ SEU Grab Script v2.7 (Appointment Confirm Version) is Running!");
 
     const BASE_URL = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/";
     const KEY_OCR = 'seu_grab_ocr_endpoint';
@@ -373,6 +373,52 @@
         }
     }
 
+    /**
+     * 【v2.7 新增】查询已预约讲座列表，遍历多页以找到目标讲座
+     * 与Python版本的 check_booking_success() 思路一致
+     */
+    async function queryMyActivityList(targetWID, maxPage = 5) {
+        const url = BASE_URL + `hdyy/queryMyActivityList.do?_=${Date.now()}`;
+        
+        for (let page = 1; page <= maxPage; page++) {
+            try {
+                const response = await fetchRequest(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    data: `pageIndex=${page}&pageSize=10&sortField=&sortOrder=`
+                }, 5000);
+
+                const responseText = await response.text();
+
+                if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                    logStream(`查询已预约列表会话失效`, 'warn');
+                    return false;
+                }
+
+                const json_data = JSON.parse(responseText);
+                const datas = json_data.datas || [];
+                
+                // 遍历当前页，检查是否在已预约列表中
+                for (const item of datas) {
+                    if (item.HD_WID === targetWID) {
+                        return true;
+                    }
+                }
+
+                // 如果返回的数据少于 pageSize，说明没有更多数据了
+                if (datas.length < 10) {
+                    break;
+                }
+
+            } catch (error) {
+                logStream(`查询已预约列表第 ${page} 页失败: ${error.message}`, 'warn');
+                break;
+            }
+        }
+        
+        return false;
+    }
+
     // ===== 保活函数 (不变) =====
 
     /**
@@ -509,6 +555,7 @@
             let attempt = 1;
             let v_code = '';
             let lastOcrTime = 0;
+            const checkInterval = 5; // 每5次尝试查询一次已预约列表确认
 
             while (g_config.isGrabbing) {
                 try {
@@ -544,7 +591,7 @@
                         continue;
                     }
 
-                    // 【微小延迟 A】
+                    // 【微小延迟 A】随机 50-100ms
                     await new Promise(r => setTimeout(r, Math.random() * 50 + 50));
 
                     // 验证码逻辑
@@ -558,38 +605,60 @@
                         logStream(`获取新验证码: **${v_code}**`);
                     }
 
-                    // 【微小延迟 B】
+                    // 【微小延迟 B】随机 50-100ms
                     await new Promise(r => setTimeout(r, Math.random() * 50 + 50));
 
                     // 执行抢课请求
                     const result = await fetchLecture(wid, v_code);
+                    const serverSuccess = result.success;
 
-                    if (result.success) {
-                        g_config.isGrabbing = false;
-                        logStream(`**🎉🎉🎉 抢课成功!** 消息: ${result.msg}`, 'critical');
-                        Swal.fire('成功！', `【${name}】预约成功！`, 'success');
-                        updateStatus(`【${name}】抢课成功！`);
-                        break;
-                    }
+                    // 根据服务器返回设置日志样式
+                    let logLevel = 'info';
+                    if (result.msg.includes('验证码')) logLevel = 'warn';
+                    else if (result.msg.includes('频繁')) logLevel = 'warn';
+                    else if (result.success) logLevel = 'success';
+                    else logLevel = 'error';
+
+                    logStream(`服务器响应: **${result.msg}** (code=${result.code}, success=${result.success})`, logLevel);
 
                     if (result.msg.includes('验证码')) {
                         v_code = '';
-                        logStream(`抢课失败: **验证码错误**`, 'warn');
+                        // 【v2.7 新增】验证码错误后随机延迟 0.1-0.5 秒
+                        const randomDelay = Math.random() * 0.4 + 0.1;
+                        logStream(`验证码错误，随机延迟 **${randomDelay.toFixed(2)}s** 后重试...`, 'warn');
+                        await new Promise(r => setTimeout(r, randomDelay * 1000));
                     } else if (result.msg.includes('频繁')) {
-                        logStream(`抢课失败: **请求频繁**，等待 5s...`, 'warn');
-                        await new Promise(r => setTimeout(r, 5000));
+                        logStream(`请求过于频繁，等待 10s...`, 'warn');
+                        await new Promise(r => setTimeout(r, 10000));
                     } else if (result.msg.includes('已预约')) {
                         g_config.isGrabbing = false;
                         logStream(`**✅ 抢课任务结束：** ${result.msg}`, 'success');
                         Swal.fire('提示', `【${name}】${result.msg}`, 'info');
                         break;
-                    } else {
-                        logStream(`抢课失败: **${result.msg}**`, 'error');
+                    } else if (result.success) {
+                        logStream(`服务器返回成功，正在通过已预约列表确认...`, 'success');
+                    }
+
+                    // 【v2.7 核心改动】定期查询已预约列表确认是否成功
+                    // 每 checkInterval 次或服务器返回成功时查询确认
+                    if (attempt % checkInterval === 0 || serverSuccess) {
+                        logStream(`正在查询已预约列表确认结果...`, 'info');
+                        const confirmed = await queryMyActivityList(wid);
+                        
+                        if (confirmed) {
+                            g_config.isGrabbing = false;
+                            logStream(`**🎉🎉🎉 抢课成功确认！** (第 ${attempt} 次尝试)`, 'critical');
+                            Swal.fire('成功！', `【${name}】预约成功确认！`, 'success');
+                            updateStatus(`【${name}】抢课成功！`);
+                            break;
+                        } else if (serverSuccess) {
+                            logStream(`服务器返回成功但已预约列表中未找到，可能存在延迟，继续尝试...`, 'warn');
+                        }
                     }
 
                     attempt++;
-                    // 【固定延迟 C】 抢课失败后的基础间隔
-                    await new Promise(r => setTimeout(r, 300));
+                    // 【固定延迟 C】抢课失败后的基础间隔
+                    await new Promise(r => setTimeout(r, 500));
 
                 } catch (e) {
                     
@@ -714,7 +783,7 @@
 
         const headerHtml = `
             <div id="seu-control-header" style="margin-bottom: 15px; padding: 10px; border: 2px solid #4CAF50; border-radius: 4px; background-color: #f9f9f9;">
-                <h3 style="margin-top: 0; color: #4CAF50;">🎓 SEU 抢课助手 v2.6 (原生Cookie版) - 最终防反爬优化</h3>
+                <h3 style="margin-top: 0; color: #4CAF50;">🎓 SEU 抢课助手 v2.7 (预约确认版) - 通过已预约列表确认成功</h3>
 
                 <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; align-items: center;">
                     <label style="font-weight: bold; white-space: nowrap;">OCR API:</label>
@@ -808,5 +877,6 @@
     unsafeWindow.seu_config = g_config;
     unsafeWindow.seu_fetchLecture=fetchLecture;
     unsafeWindow.seu_appiontCheck=appiontCheck;
+    unsafeWindow.seu_queryMyActivityList=queryMyActivityList;
 
 })();
