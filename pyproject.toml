@@ -6,13 +6,12 @@ authors = [
     { name = "zhjcreator"},
 ]
 keywords = ["lecture", "fetch", "course"]
-license = { text = "MIT" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -22,6 +21,9 @@ dependencies = [
     "requests>=2.32.5",
     "rich>=14.1.0",
 ]
+
+[tool.setuptools]
+packages = ["gui"]
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

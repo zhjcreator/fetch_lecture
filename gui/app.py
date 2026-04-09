@@ -11,9 +11,9 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QLineEdit, QTableWidget, QTableWidgetItem,
+    QLabel, QPushButton, QLineEdit,
     QTextEdit, QSplitter, QGroupBox, QComboBox, QCheckBox,
-    QHeaderView, QSizePolicy, QMenu, QSystemTrayIcon, QMessageBox,
+    QSizePolicy, QMenu, QSystemTrayIcon, QMessageBox,
     QSpinBox, QDoubleSpinBox, QFrame, QDialog,
     QStyle, QStyleOptionViewItem, QStyledItemDelegate, QScrollArea
 )
@@ -857,25 +857,30 @@ class LectureListWidget(QWidget):
         refresh_row.addStretch()
         list_layout.addLayout(refresh_row)
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["", "讲座名称", "预约时间", "活动时间"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setColumnWidth(0, 36)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        # 讲座名称列自动换行
-        self.table.setItemDelegateForColumn(1, WrapTextDelegate(self.table))
-        # 右键菜单
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
-        # 双击查看详情
-        self.table.cellDoubleClicked.connect(self._on_table_double_click)
-        list_layout.addWidget(self.table)
+        # 卡片式讲座列表
+        self.lecture_scroll = QScrollArea()
+        self.lecture_scroll.setWidgetResizable(True)
+        self.lecture_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.lecture_scroll.setStyleSheet("""
+            QScrollArea { background-color: #1e1e2e; border: none; }
+            QScrollBar:vertical {
+                background: #1e1e2e; width: 8px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #45475a; border-radius: 4px; min-height: 30px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+        self.lecture_card_container = QWidget()
+        self.lecture_card_layout = QVBoxLayout(self.lecture_card_container)
+        self.lecture_card_layout.setContentsMargins(4, 4, 4, 4)
+        self.lecture_card_layout.setSpacing(6)
+        self.lecture_card_layout.addStretch()
+        self.lecture_scroll.setWidget(self.lecture_card_container)
+        list_layout.addWidget(self.lecture_scroll)
+        # 当前选中的讲座 index（-1 表示未选）
+        self._selected_idx = -1
+        self._lecture_cards = []  # 存放 (card_frame, checkbox) 列表
 
         layout.addWidget(list_group, stretch=1)
 
@@ -936,37 +941,183 @@ class LectureListWidget(QWidget):
         self._lecture_list = lecture_list
         self._stu_cnt_arr = stu_cnt_arr
 
-        self.table.setRowCount(len(lecture_list))
+        self._selected_idx = -1
+        self._lecture_cards = []
+
+        # 清空旧卡片
+        while self.lecture_card_layout.count():
+            item = self.lecture_card_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        if not lecture_list:
+            empty_label = QLabel("暂无可预约讲座")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setStyleSheet("color: #6c7086; font-size: 13px; padding: 20px;")
+            self.lecture_card_layout.addWidget(empty_label)
+            self.lecture_card_layout.addStretch()
+            self.lbl_count.setText("共 0 个讲座")
+            return
+
         for i, lec in enumerate(lecture_list):
-            # 复选框列
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            chk.setCheckState(Qt.CheckState.Unchecked)
-            self.table.setItem(i, 0, chk)
+            total = stu_cnt_arr[i][0] if stu_cnt_arr else 0
+            booked = stu_cnt_arr[i][1] if stu_cnt_arr else 0
+            is_full = total > 0 and booked >= total
 
-            # 讲座名称（设置为换行，后面通过 resizeRowsToContents 自动调整高度）
-            name_item = QTableWidgetItem(lec.get("JZMC", ""))
-            self.table.setItem(i, 1, name_item)
-            self.table.setItem(i, 2, QTableWidgetItem(f"{lec.get('YYKSSJ', '')} ~ {lec.get('YYJSSJ', '')}"))
-            self.table.setItem(i, 3, QTableWidgetItem(lec.get("JZSJ", "")))
+            card = QFrame()
+            card.setObjectName("lectureCard")
+            card.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            card.setStyleSheet("""
+                QFrame#lectureCard {
+                    background-color: #313244;
+                    border: 1px solid #45475a;
+                    border-radius: 8px;
+                }
+                QFrame#lectureCard:hover {
+                    border: 1px solid #89b4fa;
+                }
+                QFrame#lectureCard[selected="true"] {
+                    border: 2px solid #89b4fa;
+                    background-color: #363657;
+                }
+            """)
 
-            # 人数已满的行变暗
-            if stu_cnt_arr and stu_cnt_arr[i][0] <= stu_cnt_arr[i][1]:
-                for j in range(4):
-                    item = self.table.item(i, j)
-                    if item:
-                        item.setForeground(QColor("#6c7086"))
+            card_h = QHBoxLayout(card)
+            card_h.setContentsMargins(0, 0, 0, 0)
+            card_h.setSpacing(0)
 
-        # 根据内容自动调整行高（让讲座名称换行后完整显示）
-        self.table.resizeRowsToContents()
+            # 左侧竖条：满/有名额
+            bar = QFrame()
+            bar.setFixedWidth(40)
+            bar_color = "#f38ba8" if is_full else "#a6e3a1"
+            bar.setStyleSheet(f"""
+                QFrame#lectureBar {{
+                    background-color: {bar_color};
+                    border-top-left-radius: 8px;
+                    border-bottom-left-radius: 8px;
+                }}
+            """)
+            bar.setObjectName("lectureBar")
+            bar_inner = QVBoxLayout(bar)
+            bar_inner.setContentsMargins(0, 8, 0, 8)
+            bar_inner.setSpacing(0)
+            bar_txt = QLabel("已\n满" if is_full else "可\n约")
+            bar_txt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            bar_txt.setFont(QFont("PingFang SC", 10, QFont.Weight.Bold))
+            bar_txt.setStyleSheet("color: #1e1e2e; border: none;")
+            bar_txt.setFixedWidth(40)
+            bar_inner.addWidget(bar_txt)
+            card_h.addWidget(bar)
+
+            # 右侧内容区
+            content = QFrame()
+            content.setStyleSheet("background: transparent; border: none;")
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(12, 10, 12, 10)
+            content_layout.setSpacing(4)
+
+            # 第一行：复选框 + 讲座名称
+            top_row = QHBoxLayout()
+            top_row.setSpacing(8)
+
+            chk = QCheckBox()
+            chk.setStyleSheet("""
+                QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; }
+                QCheckBox::indicator:unchecked {
+                    background-color: #45475a; border: 2px solid #6c7086; border-radius: 4px;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #89b4fa; border: 2px solid #89b4fa; border-radius: 4px;
+                    image: none;
+                }
+            """)
+            top_row.addWidget(chk)
+
+            name_color = "#6c7086" if is_full else "#cdd6f4"
+            name_label = QLabel(lec.get("JZMC", "（未知讲座）"))
+            name_label.setWordWrap(True)
+            name_label.setFont(QFont("PingFang SC", 13, QFont.Weight.Bold))
+            name_label.setStyleSheet(f"color: {name_color}; border: none;")
+            top_row.addWidget(name_label, 1)
+            content_layout.addLayout(top_row)
+
+            # 第二行：名额 + 预约时间
+            info_color = "#585b70" if is_full else "#a6adc8"
+            info1 = QLabel(
+                f"👥 名额: {booked}/{total}　　"
+                f"🗓 预约: {lec.get('YYKSSJ', '-')} ~ {lec.get('YYJSSJ', '-')}"
+            )
+            info1.setFont(QFont("PingFang SC", 11))
+            info1.setStyleSheet(f"color: {info_color}; border: none;")
+            content_layout.addWidget(info1)
+
+            # 第三行：活动时间
+            info2 = QLabel(f"🕐 活动: {lec.get('JZSJ', '-')}")
+            info2.setFont(QFont("PingFang SC", 11))
+            info2.setStyleSheet(f"color: {info_color}; border: none;")
+            content_layout.addWidget(info2)
+
+            card_h.addWidget(content, 1)
+            self.lecture_card_layout.addWidget(card)
+            self._lecture_cards.append((card, chk))
+
+            # 单选逻辑：点击卡片或复选框时只选中此项
+            def _make_select(idx):
+                def _select(event=None):
+                    self._select_lecture(idx)
+                return _select
+
+            chk.stateChanged.connect(lambda state, idx=i: self._on_chk_changed(idx, state))
+            card.mousePressEvent = _make_select(i)
+
+            # 双击查看详情
+            card.mouseDoubleClickEvent = lambda e, idx=i: self._show_lecture_detail(idx)
+            # 右键菜单
+            card.contextMenuEvent = lambda e, idx=i: self._on_card_context_menu(e, idx)
+
+        self.lecture_card_layout.addStretch()
         self.lbl_count.setText(f"共 {len(lecture_list)} 个讲座")
 
-    def _on_table_context_menu(self, pos):
-        """右键菜单：查看详情"""
-        row = self.table.rowAt(pos.y())
-        if row < 0 or not hasattr(self, '_lecture_list'):
+    def _select_lecture(self, idx):
+        """单选逻辑：选中第 idx 张卡片，取消其他"""
+        if idx == self._selected_idx:
             return
-        menu = QMenu(self.table)
+        # 取消旧选中
+        if 0 <= self._selected_idx < len(self._lecture_cards):
+            old_card, old_chk = self._lecture_cards[self._selected_idx]
+            old_chk.blockSignals(True)
+            old_chk.setChecked(False)
+            old_chk.blockSignals(False)
+            old_card.setProperty("selected", "false")
+            old_card.style().unpolish(old_card)
+            old_card.style().polish(old_card)
+        # 选中新项
+        self._selected_idx = idx
+        card, chk = self._lecture_cards[idx]
+        chk.blockSignals(True)
+        chk.setChecked(True)
+        chk.blockSignals(False)
+        card.setProperty("selected", "true")
+        card.style().unpolish(card)
+        card.style().polish(card)
+
+    def _on_chk_changed(self, idx, state):
+        if state == Qt.CheckState.Checked.value:
+            self._select_lecture(idx)
+        elif idx == self._selected_idx:
+            # 取消自身勾选 → 清除选中
+            card, _ = self._lecture_cards[idx]
+            card.setProperty("selected", "false")
+            card.style().unpolish(card)
+            card.style().polish(card)
+            self._selected_idx = -1
+
+    def _on_card_context_menu(self, event, idx):
+        """卡片右键菜单"""
+        if not hasattr(self, '_lecture_list') or idx >= len(self._lecture_list):
+            return
+        menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
                 background-color: #313244;
@@ -975,23 +1126,20 @@ class LectureListWidget(QWidget):
                 border-radius: 6px;
                 padding: 4px;
             }
-            QMenu::item {
-                padding: 8px 24px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #45475a;
-            }
+            QMenu::item { padding: 8px 24px; border-radius: 4px; }
+            QMenu::item:selected { background-color: #45475a; }
         """)
         action_detail = menu.addAction("📋 查看详情")
-        action_detail.triggered.connect(lambda: self._show_lecture_detail(row))
-        menu.exec(self.table.viewport().mapToGlobal(pos))
+        action_detail.triggered.connect(lambda: self._show_lecture_detail(idx))
+        action_select = menu.addAction("✅ 选择此讲座")
+        action_select.triggered.connect(lambda: self._select_lecture(idx))
+        menu.exec(event.globalPos())
+
+    def _on_table_context_menu(self, pos):
+        pass  # 已废弃，保留以防信号连接报错
 
     def _on_table_double_click(self, row, col):
-        """双击行查看详情"""
-        if not hasattr(self, '_lecture_list'):
-            return
-        self._show_lecture_detail(row)
+        pass  # 已废弃
 
     def _show_lecture_detail(self, row):
         """显示讲座详情弹窗"""
@@ -1007,16 +1155,11 @@ class LectureListWidget(QWidget):
         self.append_log(f"❌ 获取讲座列表失败: {msg}", "red")
 
     def _on_start(self):
-        # 找到选中的讲座
-        selected_idx = -1
-        for i in range(self.table.rowCount()):
-            if self.table.item(i, 0).checkState() == Qt.CheckState.Checked:
-                selected_idx = i
-                break
-
-        if selected_idx < 0 or not hasattr(self, '_lecture_list'):
+        if self._selected_idx < 0 or not hasattr(self, '_lecture_list'):
             self.append_log("⚠ 请先选择一个讲座", "yellow")
             return
+
+        selected_idx = self._selected_idx
 
         lec = self._lecture_list[selected_idx]
         wid = lec["WID"]
@@ -1058,7 +1201,7 @@ class LectureListWidget(QWidget):
         self.btn_start.setEnabled(enabled)
         self.btn_stop.setEnabled(not enabled)
         self.btn_refresh.setEnabled(enabled)
-        self.table.setEnabled(enabled)
+        self.lecture_scroll.setEnabled(enabled)
 
 
 class RefreshListThread(QThread):
