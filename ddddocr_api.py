@@ -18,7 +18,8 @@ def resource_path(relative_path):
     if getattr(sys, 'frozen', False):  # 判断是否处于打包环境
         base_path = getattr(sys, '_MEIPASS', '')  # 临时解压路径
     else:
-        base_path = os.path.abspath(".")
+        # 以脚本所在目录为基准，确保无论从哪启动都能找到资源
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return str(os.path.join(base_path, relative_path))
 
 @app.route('/predict', methods=['POST'])

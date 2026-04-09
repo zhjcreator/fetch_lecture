@@ -38,9 +38,11 @@ class TLSAdapter(HTTPAdapter):
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后，资源文件在临时解压目录 _MEIPASS 下
         base_path = getattr(sys, '_MEIPASS', '')
     else:
-        base_path = PROJECT_ROOT
+        # 开发环境：以当前文件所在目录（gui/）为基准，返回上级目录（项目根目录）
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return str(os.path.join(base_path, relative_path))
 
 
