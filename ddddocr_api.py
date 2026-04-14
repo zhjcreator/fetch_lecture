@@ -9,7 +9,7 @@ import ddddocr
 from flask_cors import CORS # 导入 CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["https://ehall.seu.edu.cn"], "supports_credentials": True}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 # 全局 OCR 模型实例
 ocr = None 
 captcha_hash_table = {}
