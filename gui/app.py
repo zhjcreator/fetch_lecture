@@ -1669,8 +1669,14 @@ class FetchThread(QThread):
         while not self.stop_requested:
             attempt += 1
             try:
-                # 获取最新讲座列表检查人数
-                session, lecture_list, stu_cnt_arr = FetchLectureBackend.get_lecture_list(self.session)
+                # 获取最新讲座列表检查人数（失败时跳过余量检查，继续抢）
+                try:
+                    session, lecture_list, stu_cnt_arr = FetchLectureBackend.get_lecture_list(self.session)
+                except RuntimeError as e:
+                    # VPN/登录失效等致命错误，停止循环
+                    self.log_signal.emit(f"❌ 致命错误: {str(e)}", "red")
+                    return
+
                 if lecture_list and stu_cnt_arr:
                     for i, (total, booked) in enumerate(stu_cnt_arr):
                         if lecture_list[i].get("WID") == self.wid:
@@ -1680,9 +1686,12 @@ class FetchThread(QThread):
                                 attempt -= 1  # 不计为有效尝试
                                 continue
                             break
+                else:
+                    # 服务器繁忙，获取列表失败，跳过余量检查直接抢
+                    self.log_signal.emit("⚠ 获取列表失败，跳过余量检查，继续抢课", "yellow")
 
                 code, msg, success = backend.fetch_lecture(self.wid)
-                style = "green" if success else "red" if "频繁" in msg else "yellow"
+                style = "green" if success else "yellow" if "繁忙" in msg else "red" if "频繁" in msg else "yellow"
                 self.log_signal.emit(f"第 {attempt} 次 | {code} | {msg}", style)
 
                 if "验证码错误" in msg:
@@ -1706,7 +1715,7 @@ class FetchThread(QThread):
                 time.sleep(0.5)
 
             except Exception as e:
-                self.log_signal.emit(f"❌ 异常: {str(e)}", "red")
+                self.log_signal.emit(f"⚠ 异常(继续重试): {str(e)}", "yellow")
                 time.sleep(1)
 
 

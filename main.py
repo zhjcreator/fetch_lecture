@@ -89,14 +89,14 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         
         # 调试输出
         if not r.text.strip():
-            return 500, "服务器无响应（空内容）"
+            return 500, "服务器繁忙，无响应内容", False
         if r.headers.get("Content-Type", "").startswith("text/html"):
-            return 500, f"返回HTML（可能登录失效）: {r.text[:100]}..."
+            return 500, "服务器繁忙，返回异常页面", False
         
         try:
             result = r.json()
         except json.JSONDecodeError:
-            return 500, f"响应非JSON: {r.status_code} {r.text[:100]}..."
+            return 500, "服务器繁忙，响应非JSON", False
 
         code = result.get("code", -1)
         msg = result.get("msg", "未知错误")
@@ -105,7 +105,7 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         return code, msg, success
 
     except requests.exceptions.RequestException as e:
-        return 500, f"网络请求异常: {str(e)}", False
+        return 500, f"服务器繁忙，请求异常: {str(e)[:80]}", False
 
 
 def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
@@ -133,7 +133,7 @@ def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
                 break
                 
         except Exception as e:
-            error_console.print(f"[bold red]✗ 查询已预约讲座失败: {str(e)}[/]")
+            # 服务器繁忙，查询失败，返回 False 继续抢
             break
     
     return False
@@ -203,13 +203,17 @@ def get_lecture_list(session):
             data={"pageIndex": 1, "pageSize": 100},
             verify=False  # 禁用SSL证书验证
         )
-        lecture_list = res.json()["datas"]
+        try:
+            lecture_list = res.json()["datas"]
+        except Exception:
+            # 服务器繁忙，JSON解析失败，返回空让抢课继续
+            return session, None, None
         stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
 
         console.print("[bold green]✓ 获取讲座列表成功[/]")
         return session, lecture_list, stu_cnt_arr
     except Exception as e:
-        error_console.print(f"[bold red]✗ 获取讲座列表失败: {str(e)}[/]")
+        # 网络异常等，返回空让抢课继续
         return session, None, None
 
 
@@ -389,8 +393,8 @@ if __name__ == "__main__":
     success_confirmed = False
     
     while True:
-        # 获取最新讲座列表
-        s, _, stu_cnt_arr = get_lecture_list(s)
+        # 获取最新讲座列表（失败时跳过余量检查，继续抢）
+        s, lecture_list_refresh, stu_cnt_arr = get_lecture_list(s)
         try:
             with console.status(
                     f"[bold][yellow]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/yellow] - 第 {attempt} 次尝试..."
@@ -401,9 +405,12 @@ if __name__ == "__main__":
                     attempt += 1
                     time.sleep(1)
                     continue
+                elif not stu_cnt_arr:
+                    # 获取列表失败，跳过余量检查
+                    pass
 
                 code, msg, success = fetch_lecture(wid, s, v_code)
-                style = "green" if success else "red" if "频繁" in msg else "yellow"
+                style = "green" if success else "yellow" if "繁忙" in msg else "red" if "频繁" in msg else "yellow"
                 console.print(f"[{style}]» 状态码: {code}\n   消息: {msg}\n   成功: {success}[/]")
 
                 if "验证码错误" in msg:
@@ -447,7 +454,7 @@ if __name__ == "__main__":
                 attempt += 1
                 time.sleep(0.5)
         except Exception as e:
-            error_console.print(f"[bold red]‼ 发生异常: {str(e)}[/]")
+            console.print(f"[yellow]⚠ 异常(继续重试): {str(e)}[/]")
             time.sleep(1)
 
     # 退出处理

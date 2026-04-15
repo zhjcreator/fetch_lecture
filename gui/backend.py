@@ -182,36 +182,44 @@ class FetchLectureBackend:
     def get_lecture_list(session):
         """
         获取可预约讲座列表。返回 (session, lecture_list, stu_cnt_arr)。
+        服务器繁忙时返回空值而不抛异常，让抢课循环继续。
         """
-        res = session.post(
-            f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
-            data={"pageIndex": 1, "pageSize": 100},
-            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
-            verify=False
-        )
-        final_url = str(res.url) if res.url else ""
-
-        # 优先尝试解析 JSON
         try:
-            data = res.json()
-        except Exception:
-            # JSON 解析失败，检查是否是 VPN/校外拦截
-            if "vpn.seu.edu.cn" in final_url:
-                raise RuntimeError("当前不在校园网，请连接 EasyConnect VPN 后重试")
-            raise RuntimeError(f"接口返回非 JSON，可能 session 已失效（HTTP {res.status_code}）")
+            res = session.post(
+                f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
+                data={"pageIndex": 1, "pageSize": 100},
+                headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                verify=False
+            )
+            final_url = str(res.url) if res.url else ""
 
-        # 如果 JSON 里有 datas 字段，说明正常返回
-        if "datas" in data:
-            pass  # 继续下面的处理
-        elif "vpn.seu.edu.cn" in final_url:
-            raise RuntimeError("当前不在校园网，请连接 EasyConnect VPN 后重试")
-        elif "login" in final_url or "portal" in final_url:
-            raise RuntimeError("session 已失效，请重新登录")
-        else:
-            raise RuntimeError(f"接口返回异常（无 datas）：{str(data)[:200]}")
-        lecture_list = data["datas"]
-        stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
-        return session, lecture_list, stu_cnt_arr
+            # 优先尝试解析 JSON
+            try:
+                data = res.json()
+            except Exception:
+                # JSON 解析失败，服务器繁忙，返回空让抢课继续
+                return session, None, None
+
+            # 如果 JSON 里有 datas 字段，说明正常返回
+            if "datas" in data:
+                pass  # 继续下面的处理
+            elif "vpn.seu.edu.cn" in final_url:
+                raise RuntimeError("当前不在校园网，请连接 EasyConnect VPN 后重试")
+            elif "login" in final_url or "portal" in final_url:
+                raise RuntimeError("session 已失效，请重新登录")
+            else:
+                # 服务器返回异常JSON但非VPN/登录问题，视为繁忙
+                return session, None, None
+
+            lecture_list = data["datas"]
+            stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
+            return session, lecture_list, stu_cnt_arr
+        except RuntimeError:
+            # VPN/登录失效等需要上层的致命错误，继续抛出
+            raise
+        except Exception:
+            # 网络异常等，返回空让抢课继续
+            return session, None, None
 
     @staticmethod
     def get_my_bookings(session, page=1, page_size=50):
@@ -257,6 +265,7 @@ class FetchLectureBackend:
     def fetch_lecture(self, hd_wid: str):
         """
         发送抢课请求。返回 (code, msg, success)。
+        服务器繁忙时返回友好提示而非致命错误，让抢课循环继续重试。
         """
         v_code = self.get_code()
         url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
@@ -284,23 +293,24 @@ class FetchLectureBackend:
             r = self.session.post(url, data=form_data, verify=False)
 
             if not r.text.strip():
-                return 500, "服务器无响应（空内容）", False
+                return 500, "服务器繁忙，无响应内容", False
             if r.headers.get("Content-Type", "").startswith("text/html"):
-                return 500, f"返回HTML（可能登录失效）: {r.text[:100]}...", False
+                return 500, "服务器繁忙，返回异常页面", False
 
             try:
                 result = r.json()
             except json.JSONDecodeError:
-                return 500, f"响应非JSON: {r.status_code} {r.text[:100]}...", False
+                return 500, "服务器繁忙，响应非JSON", False
 
             return result.get("code", -1), result.get("msg", "未知错误"), result.get("success", False)
 
         except requests.exceptions.RequestException as e:
-            return 500, f"网络请求异常: {str(e)}", False
+            return 500, f"服务器繁忙，请求异常: {str(e)[:80]}", False
 
     def check_booking_success(self, target_wid: str, max_page: int = 5) -> bool:
         """
         通过查询已预约讲座列表，判断指定讲座是否预约成功。
+        查询失败时返回 False（而非抛异常），让抢课循环继续重试。
         """
         url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryMyActivityList.do"
         for page in range(1, max_page + 1):
@@ -321,6 +331,7 @@ class FetchLectureBackend:
                     break
 
             except Exception:
-                break
+                # 服务器繁忙，查询失败，返回 False 继续抢
+                return False
 
         return False
