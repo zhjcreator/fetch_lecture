@@ -24,5 +24,8 @@ accounts/
 # 验证码图片
 code_img/
 
+# 日志
+logs/
+
 # 打包
 *.spec

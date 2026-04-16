@@ -7,6 +7,8 @@ import json
 import time
 import random
 import datetime
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -29,6 +31,23 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend import FetchLectureBackend
+
+# ========== 日志配置 ==========
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+_log_file = LOG_DIR / "bookings_refresh.log"
+_file_handler = RotatingFileHandler(
+    str(_log_file), maxBytes=512 * 1024, backupCount=3, encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+bookings_log = logging.getLogger("bookings_refresh")
+bookings_log.setLevel(logging.DEBUG)
+bookings_log.addHandler(_file_handler)
+
+fetch_log = logging.getLogger("fetch_loop")
+fetch_log.setLevel(logging.DEBUG)
+fetch_log.addHandler(_file_handler)
 
 # ========== 样式表 ==========
 STYLESHEET = """
@@ -1215,6 +1234,9 @@ class RefreshListThread(QThread):
     def run(self):
         try:
             session, lecture_list, stu_cnt_arr = FetchLectureBackend.get_lecture_list(self.session)
+            if lecture_list is None:
+                lecture_list = []
+                stu_cnt_arr = []
             self.finished_ok.emit(lecture_list, stu_cnt_arr)
         except Exception as e:
             self.finished_err.emit(str(e))
@@ -1304,6 +1326,11 @@ class MyBookingsWidget(QWidget):
 
     def _on_ok(self, bookings):
         self.btn_refresh.setEnabled(True)
+
+        if bookings is None:
+            # 服务器繁忙，保留现有数据不动
+            return
+
         self._bookings = bookings
 
         # 清空旧卡片
@@ -1455,10 +1482,16 @@ class RefreshBookingsThread(QThread):
                 data={"pageIndex": 1, "pageSize": 50, "sortField": "", "sortOrder": ""},
                 verify=False
             )
-            result = res.json()
+            try:
+                result = res.json()
+            except Exception:
+                bookings_log.warning("已预约列表刷新失败: 服务器响应非JSON (HTTP %s)", res.status_code)
+                self.finished_ok.emit(None)
+                return
             datas = result.get("datas", [])
             self.finished_ok.emit(datas)
         except Exception as e:
+            bookings_log.error("已预约列表刷新异常: %s", e)
             self.finished_err.emit(str(e))
 
 
@@ -1540,11 +1573,12 @@ class MainWindow(QMainWindow):
         self.lecture_widget.stop_fetch.connect(self._on_stop_fetch)
         left_layout.addWidget(self.lecture_widget)
 
-        # 创建右侧组件
+        # 创建右侧组件（独立 session，不与抢课共享）
+        bookings_session, _ = FetchLectureBackend.login(username, password, fingerprint)
         right_layout = self.right_widget.layout()
         while right_layout.count():
             right_layout.itemAt(0).widget().setParent(None)
-        self.bookings_widget = MyBookingsWidget(session)
+        self.bookings_widget = MyBookingsWidget(bookings_session)
         right_layout.addWidget(self.bookings_widget)
 
         # 自动刷新讲座列表
@@ -1555,9 +1589,11 @@ class MainWindow(QMainWindow):
             return
         self.fetch_thread = FetchThread(
             self.session, wid, name, start_time, relogin_sec, delay_sec,
-            self._username, self._password, self._fingerprint
+            self._username, self._password, self._fingerprint,
+            bookings_session=self.bookings_widget.session
         )
         self.fetch_thread.log_signal.connect(self.lecture_widget.append_log)
+        self.fetch_thread.session_renewed.connect(self._on_session_renewed)
         self.fetch_thread.success_signal.connect(self._on_fetch_success)
         self.fetch_thread.finished_signal.connect(self._on_fetch_finished)
         self.fetch_thread.start()
@@ -1567,6 +1603,16 @@ class MainWindow(QMainWindow):
             self.fetch_thread.requestInterruption()
             self.fetch_thread.stop_requested = True
             self.lecture_widget.append_log("⏹ 正在停止...", "yellow")
+
+    def _on_session_renewed(self, session):
+        """二次登录后同步新 session，并为已预约列表创建独立 session"""
+        self.session = session
+        bookings_session, _ = FetchLectureBackend.login(
+            self._username, self._password, self._fingerprint
+        )
+        if bookings_session:
+            self.bookings_widget.session = bookings_session
+            self.fetch_thread.bookings_session = bookings_session
 
     def _on_fetch_success(self, msg):
         self.lecture_widget.append_log(msg, "green")
@@ -1586,14 +1632,16 @@ class MainWindow(QMainWindow):
 
 
 class FetchThread(QThread):
-    log_signal = pyqtSignal(str, str)  # msg, color
-    success_signal = pyqtSignal(str)   # msg
+    log_signal = pyqtSignal(str, str)      # msg, color
+    session_renewed = pyqtSignal(object)   # 新 session
+    success_signal = pyqtSignal(str)       # msg
     finished_signal = pyqtSignal()
 
     def __init__(self, session, wid, name, start_time_str, relogin_sec, delay_sec,
-                 username, password, fingerprint):
+                 username, password, fingerprint, bookings_session=None):
         super().__init__()
         self.session = session
+        self.bookings_session = bookings_session
         self.wid = wid
         self.name = name
         self.start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
@@ -1630,9 +1678,10 @@ class FetchThread(QThread):
             if not relogin_done and 0 < remaining <= self.relogin_sec:
                 self.log_signal.emit(f"🕒 提前 {self.relogin_sec} 秒，进行二次登录...", "yellow")
                 try:
-                    new_session = FetchLectureBackend.login(self.username, self.password, self.fingerprint)
-                    if new_session:
-                        self.session = new_session
+                    login_result = FetchLectureBackend.login(self.username, self.password, self.fingerprint)
+                    if login_result and login_result[0]:
+                        self.session = login_result[0]
+                        self.session_renewed.emit(self.session)
                         self.log_signal.emit("✅ 二次登录成功", "green")
                     else:
                         self.log_signal.emit("⚠ 二次登录失败，继续使用当前 session", "yellow")
@@ -1674,6 +1723,7 @@ class FetchThread(QThread):
                     session, lecture_list, stu_cnt_arr = FetchLectureBackend.get_lecture_list(self.session)
                 except RuntimeError as e:
                     # VPN/登录失效等致命错误，停止循环
+                    fetch_log.error("致命错误: %s", e)
                     self.log_signal.emit(f"❌ 致命错误: {str(e)}", "red")
                     return
 
@@ -1687,12 +1737,16 @@ class FetchThread(QThread):
                                 continue
                             break
                 else:
-                    # 服务器繁忙，获取列表失败，跳过余量检查直接抢
+                    fetch_log.warning("第%d次: 获取列表失败，跳过余量检查", attempt)
                     self.log_signal.emit("⚠ 获取列表失败，跳过余量检查，继续抢课", "yellow")
 
                 code, msg, success = backend.fetch_lecture(self.wid)
                 style = "green" if success else "yellow" if "繁忙" in msg else "red" if "频繁" in msg else "yellow"
                 self.log_signal.emit(f"第 {attempt} 次 | {code} | {msg}", style)
+                if code == 500:
+                    fetch_log.warning("第%d次: 抢课请求失败: %s", attempt, msg)
+                elif success:
+                    fetch_log.info("第%d次: 抢课请求成功: code=%s msg=%s", attempt, code, msg)
 
                 if "验证码错误" in msg:
                     time.sleep(random.uniform(0.1, 0.3))
@@ -1701,11 +1755,13 @@ class FetchThread(QThread):
                 # 定期或成功时检查已预约列表
                 if attempt % check_interval == 0 or success:
                     self.log_signal.emit("🔍 查询已预约列表确认...", "cyan")
-                    if backend.check_booking_success(self.wid):
+                    if backend.check_booking_success(self.wid, session=self.bookings_session):
+                        fetch_log.info("第%d次: 抢课成功确认！讲座: %s", attempt, self.name)
                         self.log_signal.emit(f"🎉 抢课成功！讲座: {self.name}", "green")
                         self.success_signal.emit(f"🎉 抢课成功确认！\n讲座: {self.name}\n第 {attempt} 次尝试")
                         return
                     elif success:
+                        fetch_log.warning("第%d次: 服务器返回成功但列表未确认", attempt)
                         self.log_signal.emit("⚠ 服务器返回成功但列表未确认，继续尝试...", "yellow")
 
                 if "频繁" in msg:

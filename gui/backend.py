@@ -8,6 +8,8 @@ import sys
 import time
 import base64
 import random
+import logging
+import logging.handlers
 from hashlib import md5
 from io import BytesIO
 
@@ -20,6 +22,36 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_ROOT)
 
 from seu_auth import seu_login
+
+# JSON 解析工具：跳过前导垃圾字节，找到第一个 { 或 [ 开始解析
+import re
+_JSON_START_RE = re.compile(r'[\[\{]')
+
+def _parse_json(res):
+    """尝试从响应中解析 JSON，自动跳过前导不可见字节（BOM、gzip 残留等）。"""
+    try:
+        return res.json()
+    except (json.JSONDecodeError, Exception):
+        text = res.text
+        m = _JSON_START_RE.search(text)
+        if m:
+            try:
+                return json.loads(text[m.start():])
+            except (json.JSONDecodeError, Exception):
+                return None
+        return None
+
+# 日志（与 app.py 共享同一个日志文件）
+_LOG_DIR = os.path.join(PROJECT_ROOT, "..", "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+_log_file = os.path.join(_LOG_DIR, "bookings_refresh.log")
+_fh = logging.handlers.RotatingFileHandler(
+    _log_file, maxBytes=512 * 1024, backupCount=3, encoding="utf-8"
+)
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+_log = logging.getLogger("backend")
+_log.setLevel(logging.DEBUG)
+_log.addHandler(_fh)
 
 import ssl
 from requests.adapters import HTTPAdapter
@@ -69,9 +101,45 @@ def _init_ocr():
 
 
 class FetchLectureBackend:
+    CAPTCHA_TTL = 5  # 验证码缓存秒数，短时间内验证码不会变，避免重复请求
+
     def __init__(self, session):
         self.session = session
         _init_ocr()
+        self._captcha_code = None
+        self._captcha_time = 0
+
+    def get_code(self):
+        """获取并识别验证码。短时间内复用缓存，避免重复请求。"""
+        now = time.time()
+        if self._captcha_code and now - self._captcha_time < self.CAPTCHA_TTL:
+            return self._captcha_code
+
+        c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
+        c = self.session.post(c_url)
+        try:
+            c_r = c.json()
+        except Exception:
+            raise RuntimeError("验证码接口繁忙，响应非JSON")
+        if "result" not in c_r:
+            raise RuntimeError("验证码接口繁忙，响应缺少result字段")
+        c_img = base64.b64decode(c_r["result"].split(",")[1])
+        result = ""
+
+        if _captcha_hash_table:
+            img = Image.open(BytesIO(c_img))
+            with BytesIO() as output:
+                img.save(output, format="JPEG")
+                hash_val = md5(output.getvalue()).hexdigest()
+            if hash_val in _captcha_hash_table:
+                result = _captcha_hash_table[hash_val]
+
+        if not result:
+            result = _ocr.classification(c_img)
+
+        self._captcha_code = result
+        self._captcha_time = now
+        return result
 
     @staticmethod
     def login(username: str, password: str, fingerprint=None):
@@ -194,10 +262,8 @@ class FetchLectureBackend:
             final_url = str(res.url) if res.url else ""
 
             # 优先尝试解析 JSON
-            try:
-                data = res.json()
-            except Exception:
-                # JSON 解析失败，服务器繁忙，返回空让抢课继续
+            data = _parse_json(res)
+            if data is None:
                 return session, None, None
 
             # 如果 JSON 里有 datas 字段，说明正常返回
@@ -233,41 +299,22 @@ class FetchLectureBackend:
             headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
             verify=False
         )
-        try:
-            data = res.json()
-        except Exception:
+        data = _parse_json(res)
+        if data is None:
             final_url = str(res.url) if res.url else ""
             if "vpn.seu.edu.cn" in final_url:
                 raise RuntimeError("当前不在校园网，请连接 EasyConnect VPN 后重试")
             return []
-
-    def get_code(self):
-        """获取并识别验证码。"""
-        c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
-        c = self.session.post(c_url)
-        c_r = c.json()
-        c_img = base64.b64decode(c_r["result"].split(",")[1])
-        result = ""
-
-        if _captcha_hash_table:
-            img = Image.open(BytesIO(c_img))
-            with BytesIO() as output:
-                img.save(output, format="JPEG")
-                hash_val = md5(output.getvalue()).hexdigest()
-            if hash_val in _captcha_hash_table:
-                result = _captcha_hash_table[hash_val]
-
-        if not result:
-            result = _ocr.classification(c_img)
-
-        return result
 
     def fetch_lecture(self, hd_wid: str):
         """
         发送抢课请求。返回 (code, msg, success)。
         服务器繁忙时返回友好提示而非致命错误，让抢课循环继续重试。
         """
-        v_code = self.get_code()
+        try:
+            v_code = self.get_code()
+        except RuntimeError as e:
+            return 500, str(e), False
         url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
 
         data_payload = {"HD_WID": hd_wid, "vcode": v_code}
@@ -282,7 +329,7 @@ class FetchLectureBackend:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
             "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "X-Requested-With": "XMLHttpRequest",
         }
@@ -293,34 +340,48 @@ class FetchLectureBackend:
             r = self.session.post(url, data=form_data, verify=False)
 
             if not r.text.strip():
+                _log.warning("yySave HTTP %s: 响应为空", r.status_code)
                 return 500, "服务器繁忙，无响应内容", False
             if r.headers.get("Content-Type", "").startswith("text/html"):
+                _log.warning("yySave HTTP %s: 返回HTML页面 (前200字符): %s", r.status_code, r.text[:200])
                 return 500, "服务器繁忙，返回异常页面", False
 
-            try:
-                result = r.json()
-            except json.JSONDecodeError:
+            result = _parse_json(r)
+            if result is None:
+                prefix = r.content[:20] if r.content else b''
+                _log.warning("yySave HTTP %s: 响应非JSON (前200字符): %s | 原始前20字节hex: %s",
+                             r.status_code, r.text[:200], prefix.hex())
                 return 500, "服务器繁忙，响应非JSON", False
 
-            return result.get("code", -1), result.get("msg", "未知错误"), result.get("success", False)
+            code = result.get("code", -1)
+            msg = result.get("msg", "未知错误")
+            success = result.get("success", False)
+            if success:
+                _log.info("yySave 成功: code=%s msg=%s", code, msg)
+            else:
+                _log.warning("yySave 失败: code=%s msg=%s", code, msg)
+            return code, msg, success
 
         except requests.exceptions.RequestException as e:
             return 500, f"服务器繁忙，请求异常: {str(e)[:80]}", False
 
-    def check_booking_success(self, target_wid: str, max_page: int = 5) -> bool:
+    def check_booking_success(self, target_wid: str, max_page: int = 5, session=None) -> bool:
         """
         通过查询已预约讲座列表，判断指定讲座是否预约成功。
         查询失败时返回 False（而非抛异常），让抢课循环继续重试。
         """
+        s = session or self.session
         url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryMyActivityList.do"
         for page in range(1, max_page + 1):
             try:
-                res = self.session.post(
+                res = s.post(
                     f"{url}?_={int(time.time() * 1000)}",
                     data={"pageIndex": page, "pageSize": 10, "sortField": "", "sortOrder": ""},
                     verify=False
                 )
-                result = res.json()
+                result = _parse_json(res)
+                if result is None:
+                    continue
                 datas = result.get("datas", [])
 
                 for item in datas:

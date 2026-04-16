@@ -77,7 +77,7 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
         "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh-Hans;q=0.9",
         "X-Requested-With": "XMLHttpRequest",
     }
