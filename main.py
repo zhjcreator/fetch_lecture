@@ -4,6 +4,7 @@ import sys
 import time
 import base64
 import random
+import re
 from hashlib import md5
 from io import BytesIO
 import select
@@ -19,6 +20,23 @@ from rich.table import Table
 from rich.panel import Panel
 
 from seu_auth import seu_login  # 确保该模块存在
+
+# JSON 解析工具：跳过前导垃圾字节
+_JSON_START_RE = re.compile(r'[\[\{]')
+
+def _parse_json(res):
+    """尝试从响应中解析 JSON，自动跳过前导不可见字节。"""
+    try:
+        return res.json()
+    except (json.JSONDecodeError, Exception):
+        text = res.text
+        m = _JSON_START_RE.search(text)
+        if m:
+            try:
+                return json.loads(text[m.start():])
+            except (json.JSONDecodeError, Exception):
+                return None
+        return None
 
 # 初始化 rich 组件
 console = Console()
@@ -94,9 +112,9 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
             return 500, "服务器繁忙，返回异常页面", False
         
         try:
-            result = r.json()
-        except json.JSONDecodeError:
-            return 500, "服务器繁忙，响应非JSON", False
+            result = _parse_json(r)
+            if result is None:
+                return 500, "服务器繁忙，响应非JSON", False
 
         code = result.get("code", -1)
         msg = result.get("msg", "未知错误")
@@ -121,7 +139,9 @@ def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
                 data={"pageIndex": page, "pageSize": 10, "sortField": "", "sortOrder": ""},
                 verify=False
             )
-            result = res.json()
+            result = _parse_json(res)
+            if result is None:
+                break
             datas = result.get("datas", [])
             
             for item in datas:
@@ -142,7 +162,12 @@ def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
 def get_code(ss, captcha_hash_table=None):
     c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
     c = ss.post(c_url)
-    c_r = c.json()
+    try:
+        c_r = _parse_json(c)
+        if c_r is None or "result" not in c_r:
+            raise RuntimeError("验证码接口繁忙")
+    except (json.JSONDecodeError, RuntimeError):
+        raise RuntimeError("验证码接口繁忙")
     c_img = base64.b64decode(c_r["result"].split(",")[1])
     result = ""
 
@@ -204,10 +229,11 @@ def get_lecture_list(session):
             verify=False  # 禁用SSL证书验证
         )
         try:
-            lecture_list = res.json()["datas"]
-        except Exception:
-            # 服务器繁忙，JSON解析失败，返回空让抢课继续
-            return session, None, None
+            data = _parse_json(res)
+            if data is None or "datas" not in data:
+                # 服务器繁忙，JSON解析失败，返回空让抢课继续
+                return session, None, None
+            lecture_list = data["datas"]
         stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
 
         console.print("[bold green]✓ 获取讲座列表成功[/]")

@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name          SEU研究生讲座抢课脚本 v2.7 (预约确认版)
+// @name          SEU研究生讲座抢课脚本 v2.8 (brotli 修复版)
 // @namespace     http://tampermonkey.net/
-// @version       2.7
+// @version       2.8
 // @description   使用原生Cookie和Session发送请求，通过查询已预约列表确认抢课成功，思路与Python版本保持一致。
 // @author        Fixed Version
 // @match         https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*
@@ -36,7 +36,7 @@
     let g_streamLogCounter = 0;
     let g_keepAliveTimer = null;
 
-    // ===== 状态与日志函数 (保持不变) =====
+    // ===== 状态与日志函数 =====
 
     function updateStatus(msg) {
         const statusEl = document.getElementById('global-status-seu');
@@ -102,7 +102,7 @@
             // 浏览器标识 Headers
             'User-Agent': navigator.userAgent,
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-            'Accept-Encoding': 'gzip, deflate, br', // 模拟浏览器接受压缩
+            'Accept-Encoding': 'gzip, deflate', // 模拟浏览器接受压缩
 
             // 新兴安全 Headers (与 HAR 文件中 yySave.do 请求一致，强烈建议保留)
             'Sec-Fetch-Dest': 'empty',
@@ -165,8 +165,11 @@
                 throw new Error('会话已失效，需要重新登录');
             }
 
-            const result = JSON.parse(responseText);
-            
+            const result = parseJSONSafe(responseText);
+            if (!result) {
+                throw new Error('appiontCheck 响应格式异常');
+            }
+
             if (!result.success) {
                 // appiontCheck 失败通常表示：已预约、已取消、名额已满、预约时间未到等
                 logStream(`前置检查失败: **${result.msg}**`, 'warn');
@@ -188,6 +191,28 @@
         }
     }
 
+
+    // ===== JSON 解析工具：跳过前导乱码字节 =====
+
+    const _JSON_START_RE = /[\[\{]/;
+
+    function parseJSONSafe(text) {
+        // 尝试直接解析
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            // 找不到 JSON 结构，尝试找第一个 { 或 [ 起始位置
+            const m = _JSON_START_RE.exec(text);
+            if (m) {
+                try {
+                    return JSON.parse(text.substring(m.index));
+                } catch (e2) {
+                    return null;
+                }
+            }
+            return null;
+        }
+    }
 
     /**
      * 调用 OCR API (不变)
@@ -216,7 +241,7 @@
                         headers: { 
                             'Content-Type': 'application/json',
                             'Accept': 'application/json',
-                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Accept-Encoding': 'gzip, deflate',
                         },
                         body: JSON.stringify({ img_b64: b64_data }),
                         signal: controller.signal,
@@ -318,7 +343,11 @@
                 }
             }
 
-            const result = JSON.parse(responseText);
+            const result = parseJSONSafe(responseText);
+            if (!result) {
+                logStream(`**❌ 服务器响应格式异常**，将重试...`, 'critical');
+                throw new Error('服务器响应格式异常');
+            }
             return {
                 code: result.code,
                 msg: result.msg,
@@ -357,8 +386,8 @@
                 throw new Error('会话已失效，请刷新页面重新登录');
             }
 
-            const json_data = JSON.parse(responseText);
-            if (!json_data.datas) throw new Error('讲座列表为空或格式错误');
+            const json_data = parseJSONSafe(responseText);
+            if (!json_data || !json_data.datas) throw new Error('讲座列表为空或格式错误');
 
             injectGrabButtons(json_data.datas);
             return json_data.datas;
@@ -395,7 +424,11 @@
                     return false;
                 }
 
-                const json_data = JSON.parse(responseText);
+                const json_data = parseJSONSafe(responseText);
+                if (!json_data) {
+                    logStream(`查询已预约列表解析失败`, 'warn');
+                    return false;
+                }
                 const datas = json_data.datas || [];
                 
                 // 遍历当前页，检查是否在已预约列表中
@@ -447,8 +480,8 @@
                 return;
             }
 
-            const json_data = JSON.parse(responseText);
-            if (json_data.datas) {
+            const json_data = parseJSONSafe(responseText);
+            if (json_data && json_data.datas) {
                 console.log('✓ 保活成功 -', new Date().toLocaleTimeString());
             }
         } catch (error) {
