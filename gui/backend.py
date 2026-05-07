@@ -10,6 +10,7 @@ import base64
 import random
 import logging
 import logging.handlers
+import urllib3
 from hashlib import md5
 from io import BytesIO
 
@@ -55,6 +56,9 @@ _log.addHandler(_fh)
 
 import ssl
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import InsecureRequestWarning
+
+urllib3.disable_warnings(InsecureRequestWarning)
 
 
 class TLSAdapter(HTTPAdapter):
@@ -87,10 +91,9 @@ def _init_ocr():
     global _ocr, _captcha_hash_table
     if _ocr is not None:
         return
-    onnx_path = resource_path("model.onnx")
-    charsets_path = resource_path("charsets.json")
+    # 自定义模型 model.onnx 已与当前验证码格式不兼容，改用默认内置模型
     captcha_hash_table_path = resource_path("captcha_hash_table.csv")
-    _ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path, show_ad=False)
+    _ocr = ddddocr.DdddOcr(show_ad=False)
     _captcha_hash_table = {}
     if os.path.exists(captcha_hash_table_path):
         with open(captcha_hash_table_path) as f:
@@ -116,7 +119,17 @@ class FetchLectureBackend:
             return self._captcha_code
 
         c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
-        c = self.session.post(c_url)
+        c_headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+            "Referer": getattr(self.session, "ehall_referer",
+                               "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"),
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        c = self.session.post(c_url, headers=c_headers)
         try:
             c_r = c.json()
         except Exception:
@@ -137,8 +150,13 @@ class FetchLectureBackend:
         if not result:
             result = _ocr.classification(c_img)
 
-        self._captcha_code = result
-        self._captcha_time = now
+        if result:
+            # 只有非空验证码才缓存，空验证码不缓存以免一直发空请求
+            self._captcha_code = result
+            self._captcha_time = now
+        else:
+            self._captcha_code = None
+            _log.warning("验证码识别失败（空结果），下次重新获取")
         return result
 
     @staticmethod
@@ -174,6 +192,8 @@ class FetchLectureBackend:
             res = session.get(redirect_url, verify=False, allow_redirects=True)
             if res.status_code != 200:
                 return None, f"访问讲座系统失败: HTTP {res.status_code}"
+            # 保存 ehall 首页完整 URL（含 gid_ 等安全参数），供后续请求作为 Referer
+            session.ehall_referer = res.url
         except Exception as e:
             return None, f"访问讲座系统异常: {e}"
         return session, None
@@ -242,6 +262,7 @@ class FetchLectureBackend:
             session2.mount("https://", TLSAdapter())
             session2.mount("http://", TLSAdapter())
             res = session2.get(redirect_url, verify=False, allow_redirects=True)
+            session2.ehall_referer = res.url
             return session2, None
 
         return None, "获取重定向URL失败"
@@ -315,29 +336,28 @@ class FetchLectureBackend:
             v_code = self.get_code()
         except RuntimeError as e:
             return 500, str(e), False
+        if not v_code:
+            _log.warning("验证码识别为空，跳过本次请求")
+            return 500, "验证码识别失败", False
         url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
 
         data_payload = {"HD_WID": hd_wid, "vcode": v_code}
         form_data = {"paramJson": json.dumps(data_payload)}
 
         headers = {
-            "Host": "ehall.seu.edu.cn",
             "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Origin": "https://ehall.seu.edu.cn",
             "Sec-Fetch-Site": "same-origin",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
-            "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
-            "Accept-Encoding": "gzip, deflate",
-            "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+            "Referer": getattr(self.session, "ehall_referer",
+                               "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"),
             "X-Requested-With": "XMLHttpRequest",
         }
 
-        self.session.headers.update(headers)
-
         try:
-            r = self.session.post(url, data=form_data, verify=False)
+            r = self.session.post(url, data=form_data, headers=headers, verify=False)
 
             if not r.text.strip():
                 _log.warning("yySave HTTP %s: 响应为空", r.status_code)

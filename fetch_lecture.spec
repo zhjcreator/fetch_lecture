@@ -16,8 +16,6 @@ a = Analysis(
     pathex=[current_dir],
     binaries=[],
     datas=[
-        ('model.onnx', '.'),
-        ('charsets.json', '.'),
         ('captcha_hash_table.csv', '.'),
         ('seu_auth.py', '.')
     ],

@@ -97,13 +97,11 @@ if __name__ == '__main__':
     # 启动前加载模型
 
 
-    # --- 1. 初始化模型 ---
-    onnx_path = resource_path("model.onnx")
-    charsets_path = resource_path("charsets.json")
+    # --- 1. 初始化模型 (使用 ddddocr 默认内置模型) ---
     captcha_hash_table_path = resource_path("captcha_hash_table.csv")
-    
+
     try:
-        ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path, show_ad=False)
+        ocr = ddddocr.DdddOcr(show_ad=False)
     except Exception as e:
         print(f"FATAL ERROR: Failed to initialize ddddocr model: {e}")
         # 即使模型加载失败，服务也继续运行以提供健康检查和调试

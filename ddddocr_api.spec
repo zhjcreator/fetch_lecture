@@ -6,8 +6,6 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('model.onnx', '.'),
-        ('charsets.json', '.'),
         ('captcha_hash_table.csv', '.')
     ],
     hiddenimports=[

@@ -5,6 +5,7 @@ import time
 import base64
 import random
 import re
+import urllib3
 from hashlib import md5
 from io import BytesIO
 import select
@@ -55,6 +56,9 @@ def resource_path(relative_path):
 
 import ssl
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import InsecureRequestWarning
+
+urllib3.disable_warnings(InsecureRequestWarning)
 
 class TLSAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
@@ -81,29 +85,28 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
     """
     url = "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/yySave.do"
     
+    if not ver_code:
+        return 500, "验证码识别失败", False
+    
     # 模拟前端通过 POST 发送一个包含 JSON 字符串的 'paramJson' 字段
     data_payload = {"HD_WID": hd_wid, "vcode": ver_code}
     form_data = {"paramJson": json.dumps(data_payload)}
     
     # 设置 HTTP Headers，模拟浏览器发送 AJAX 请求
     headers = {
-        "Host": "ehall.seu.edu.cn",
         "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Origin": "https://ehall.seu.edu.cn",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Referer": "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do",
-        "Accept-Encoding": "gzip, deflate",
-        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        "Referer": getattr(ss, "ehall_referer",
+                           "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"),
         "X-Requested-With": "XMLHttpRequest",
     }
-    
-    ss.headers.update(headers)
-    
+
     try:
-        r = ss.post(url, data=form_data, verify=False)
+        r = ss.post(url, data=form_data, headers=headers, verify=False)
         
         # 调试输出
         if not r.text.strip():
@@ -111,10 +114,9 @@ def fetch_lecture(hd_wid: str, ss, ver_code):
         if r.headers.get("Content-Type", "").startswith("text/html"):
             return 500, "服务器繁忙，返回异常页面", False
         
-        try:
-            result = _parse_json(r)
-            if result is None:
-                return 500, "服务器繁忙，响应非JSON", False
+        result = _parse_json(r)
+        if result is None:
+            return 500, "服务器繁忙，响应非JSON", False
 
         code = result.get("code", -1)
         msg = result.get("msg", "未知错误")
@@ -161,7 +163,17 @@ def check_booking_success(ss, target_wid: str, max_page: int = 5) -> bool:
 
 def get_code(ss, captcha_hash_table=None):
     c_url = f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/vcode.do?_={int(time.time() * 1000)}"
-    c = ss.post(c_url)
+    c_headers = {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "Referer": getattr(ss, "ehall_referer",
+                           "https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/*default/index.do"),
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    c = ss.post(c_url, headers=c_headers)
     try:
         c_r = _parse_json(c)
         if c_r is None or "result" not in c_r:
@@ -208,13 +220,17 @@ def login(username: str, password: str, fingerprint=None):
         if not redirect_url:
             raise Exception("获取重定向url失败")
 
-        res = session.get(redirect_url, verify=False)
+        # 在访问 ehall 前先挂 TLSAdapter，并清掉统一认证阶段遗留的 JSON Content-Type，
+        # 否则后续表单接口会带错请求头，导致列表接口返回异常。
+        session.mount("https://", TLSAdapter())
+        session.mount("http://", TLSAdapter())
+        session.headers.pop("Content-Type", None)
+
+        res = session.get(redirect_url, verify=False, allow_redirects=True)
         if res.status_code != 200:
             raise Exception(f"访问研究生素质讲座系统失败[{res.status_code}, {res.reason}]")
-
-        # 在访问 ehall 前重新 mount TLSAdapter
-        session.mount("https://", TLSAdapter())
-        session.mount("http://", TLSAdapter())       
+        # 保存 ehall 首页完整 URL（含 gid_ 等安全参数），供后续请求作为 Referer
+        session.ehall_referer = res.url
         return session
     except Exception as e:
         error_console.print(Panel.fit(f"[bold red]✗ 登录失败: {str(e)}[/]", title="错误"))
@@ -226,14 +242,14 @@ def get_lecture_list(session):
         res = session.post(
             f"https://ehall.seu.edu.cn/gsapp/sys/jzxxtjapp/hdyy/queryActivityList.do?_={int(time.time() * 1000)}",
             data={"pageIndex": 1, "pageSize": 100},
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
             verify=False  # 禁用SSL证书验证
         )
-        try:
-            data = _parse_json(res)
-            if data is None or "datas" not in data:
-                # 服务器繁忙，JSON解析失败，返回空让抢课继续
-                return session, None, None
-            lecture_list = data["datas"]
+        data = _parse_json(res)
+        if data is None or "datas" not in data:
+            # 服务器繁忙，JSON解析失败，返回空让抢课继续
+            return session, None, None
+        lecture_list = data["datas"]
         stu_cnt_arr = [[int(l["HDZRS"]), int(l["YYRS"])] for l in lecture_list]
 
         console.print("[bold green]✓ 获取讲座列表成功[/]")
@@ -274,11 +290,9 @@ def print_lecture_list(lecture_list: list):
 
 
 if __name__ == "__main__":
-    # 初始化验证码组件
-    onnx_path = resource_path("model.onnx")
-    charsets_path = resource_path("charsets.json")
+    # 初始化验证码组件（自定义模型已不兼容新验证码，改用默认内置模型）
     captcha_hash_table_path = resource_path("captcha_hash_table.csv")
-    ocr = ddddocr.DdddOcr(import_onnx_path=onnx_path, charsets_path=charsets_path, show_ad=False)
+    ocr = ddddocr.DdddOcr(show_ad=False)
     captcha_hash_table = {}
     if os.path.exists(captcha_hash_table_path):
         with open(captcha_hash_table_path) as f:
@@ -438,6 +452,11 @@ if __name__ == "__main__":
                 code, msg, success = fetch_lecture(wid, s, v_code)
                 style = "green" if success else "yellow" if "繁忙" in msg else "red" if "频繁" in msg else "yellow"
                 console.print(f"[{style}]» 状态码: {code}\n   消息: {msg}\n   成功: {success}[/]")
+
+                if not v_code:
+                    # 验证码为空，立即重新获取
+                    v_code, v_img = get_code(ss=s, captcha_hash_table=captcha_hash_table)
+                    continue
 
                 if "验证码错误" in msg:
                     # 保存验证码

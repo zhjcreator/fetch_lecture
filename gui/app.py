@@ -55,7 +55,7 @@ QMainWindow {
     background-color: #1e1e2e;
 }
 QWidget {
-    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
     font-size: 14px;
     color: #cdd6f4;
 }
@@ -1486,7 +1486,7 @@ class RefreshBookingsThread(QThread):
                 result = res.json()
             except Exception:
                 bookings_log.warning("已预约列表刷新失败: 服务器响应非JSON (HTTP %s)", res.status_code)
-                self.finished_ok.emit(None)
+                self.finished_ok.emit([])
                 return
             datas = result.get("datas", [])
             self.finished_ok.emit(datas)
@@ -1728,14 +1728,17 @@ class FetchThread(QThread):
                     return
 
                 if lecture_list and stu_cnt_arr:
+                    skip_fetch = False
                     for i, (total, booked) in enumerate(stu_cnt_arr):
                         if lecture_list[i].get("WID") == self.wid:
                             if total <= booked:
                                 self.log_signal.emit(f"⚠ 人数已满 ({booked}/{total})，等待...", "yellow")
                                 time.sleep(1)
                                 attempt -= 1  # 不计为有效尝试
-                                continue
+                                skip_fetch = True
                             break
+                    if skip_fetch:
+                        continue
                 else:
                     fetch_log.warning("第%d次: 获取列表失败，跳过余量检查", attempt)
                     self.log_signal.emit("⚠ 获取列表失败，跳过余量检查，继续抢课", "yellow")

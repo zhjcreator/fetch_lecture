@@ -27,6 +27,13 @@ from Crypto.PublicKey import RSA
 
 from requests.adapters import HTTPAdapter
 
+
+def create_session():
+    """创建默认不继承系统代理环境变量的会话。"""
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
 class TLSAdapter(HTTPAdapter):
     """
     用于支持TLSv1.2的适配器。解决校园网内脚本ssl报错。
@@ -55,7 +62,7 @@ def get_pub_key():
         pub_key: RSA公钥
     """
     try:
-        session = requests.Session()
+        session = create_session()
         session.mount("https://", TLSAdapter())
 
         # Headers中的Content-Type、UA必填；
